@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		229AB5FDB95219058D7CF80C /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 960681BFC70BA689163A9755 /* ImageIO.framework */; };
 		443F8974D17889306D6C38E8 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 652488B8DC4412D06ABC6CD9 /* UIKit.framework */; };
 		577B6F048EF59E23F66110CD /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */; };
 		68FF2A1B46CEE987DFE667BC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D10A4FDB7ACD80E4768132D5 /* Assets.xcassets */; };
@@ -15,10 +16,12 @@
 		8C0303B51A71BDDE807FB216 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */; };
 		8C5B902B6835044F87FDCF15 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 082881A3D7B646A2BD564291 /* MetalKit.framework */; };
 		A10DCC53B04CEBF1EA7F9A58 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CAA90F234DCDF94D09B6E29 /* libapp.a */; };
+		AD7D50C9664E7579FE5AE634 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 910AF1ADEBA2C2BEFD37A3BF /* libapp.a */; };
 		C486E0AF8DB292C9FBF82FF0 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = FAB3B6BCD997139849557DE5 /* main.mm */; };
 		D6BBFBA868BC3D424E19C9B0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */; };
 		EA4576A4CCA96A03C0DBB967 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3FE65E77EED40312746DB2B6 /* Security.framework */; };
 		EE95D4EC223CBF05FADB383B /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F020FAADEBE7A9FD5A2694E /* WebKit.framework */; };
+		F71D5CB46F6D7A74DC9F2F38 /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,15 +30,21 @@
 		2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		3FE65E77EED40312746DB2B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		471F0F46C3232A78F11EF9CC /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		4BB6744549204134D5B9AECD /* ocr_apple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ocr_apple.m; sourceTree = "<group>"; };
 		5E91CC88679B5609D052D692 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		5F020FAADEBE7A9FD5A2694E /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		62789070DE6AE14AF193AD52 /* ocr.rs */ = {isa = PBXFileReference; path = ocr.rs; sourceTree = "<group>"; };
 		652488B8DC4412D06ABC6CD9 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		6B40591F00A58983AC612467 /* share2cal_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = share2cal_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7CAA90F234DCDF94D09B6E29 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		910AF1ADEBA2C2BEFD37A3BF /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		960681BFC70BA689163A9755 /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = System/Library/Frameworks/ImageIO.framework; sourceTree = SDKROOT; };
 		9DC1C616C55164C179573C40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
 		C1AD9170B737F2803812FE5C /* share2cal_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = share2cal_iOS.entitlements; sourceTree = "<group>"; };
 		C5C084E09AFC7DD12869B016 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		CDE1145D93D8DC49AACD85F9 /* ocr_apple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ocr_apple.h; sourceTree = "<group>"; };
 		D10A4FDB7ACD80E4768132D5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F0298A197D26609C225A7EAA /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -49,11 +58,13 @@
 			files = (
 				A10DCC53B04CEBF1EA7F9A58 /* libapp.a in Frameworks */,
 				8C0303B51A71BDDE807FB216 /* CoreGraphics.framework in Frameworks */,
+				229AB5FDB95219058D7CF80C /* ImageIO.framework in Frameworks */,
 				77CC95B5E1A02804BC5BC280 /* Metal.framework in Frameworks */,
 				8C5B902B6835044F87FDCF15 /* MetalKit.framework in Frameworks */,
 				577B6F048EF59E23F66110CD /* QuartzCore.framework in Frameworks */,
 				EA4576A4CCA96A03C0DBB967 /* Security.framework in Frameworks */,
 				443F8974D17889306D6C38E8 /* UIKit.framework in Frameworks */,
+				F71D5CB46F6D7A74DC9F2F38 /* Vision.framework in Frameworks */,
 				EE95D4EC223CBF05FADB383B /* WebKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -65,12 +76,14 @@
 			isa = PBXGroup;
 			children = (
 				2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */,
+				960681BFC70BA689163A9755 /* ImageIO.framework */,
 				7CAA90F234DCDF94D09B6E29 /* libapp.a */,
 				C5C084E09AFC7DD12869B016 /* Metal.framework */,
 				082881A3D7B646A2BD564291 /* MetalKit.framework */,
 				94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */,
 				3FE65E77EED40312746DB2B6 /* Security.framework */,
 				652488B8DC4412D06ABC6CD9 /* UIKit.framework */,
+				BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */,
 				5F020FAADEBE7A9FD5A2694E /* WebKit.framework */,
 			);
 			name = Frameworks;
@@ -89,6 +102,9 @@
 			children = (
 				5E91CC88679B5609D052D692 /* lib.rs */,
 				F0298A197D26609C225A7EAA /* main.rs */,
+				CDE1145D93D8DC49AACD85F9 /* ocr_apple.h */,
+				4BB6744549204134D5B9AECD /* ocr_apple.m */,
+				62789070DE6AE14AF193AD52 /* ocr.rs */,
 			);
 			name = src;
 			path = ../../src;
@@ -97,6 +113,7 @@
 		4E415844134DEF1A87F62DFF /* Externals */ = {
 			isa = PBXGroup;
 			children = (
+				F21301BEADD29E3FF5D3EEA3 /* arm64 */,
 			);
 			path = Externals;
 			sourceTree = "<group>";
@@ -107,6 +124,14 @@
 				95C74BA16E0E1D481832661C /* share2cal */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		66FF077D4FEFCFFBCA41D6AE /* debug */ = {
+			isa = PBXGroup;
+			children = (
+				910AF1ADEBA2C2BEFD37A3BF /* libapp.a */,
+			);
+			path = debug;
 			sourceTree = "<group>";
 		};
 		68966DDE62A2849AB3C9300B /* Products */ = {
@@ -148,6 +173,21 @@
 				2E95472CD5913783B7BD1CA8 /* bindings */,
 			);
 			path = share2cal;
+			sourceTree = "<group>";
+		};
+		F21301BEADD29E3FF5D3EEA3 /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+				66FF077D4FEFCFFBCA41D6AE /* debug */,
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_CFE14524-F677-421E-B368-74E0FDFBB7F8" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -211,6 +251,7 @@
 				68FF2A1B46CEE987DFE667BC /* Assets.xcassets in Resources */,
 				D6BBFBA868BC3D424E19C9B0 /* LaunchScreen.storyboard in Resources */,
 				86EF1C15CD5B0F7EF8C68D4D /* assets in Resources */,
+				AD7D50C9664E7579FE5AE634 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -332,7 +373,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal;
-				PRODUCT_NAME = share2cal;
+				PRODUCT_NAME = "share2cal";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -363,7 +404,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal;
-				PRODUCT_NAME = share2cal;
+				PRODUCT_NAME = "share2cal";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
