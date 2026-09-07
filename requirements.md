@@ -39,6 +39,10 @@ The app allows users to share screenshots of text or images of flyers and automa
 
 ### 4. Native Calendar Integration
 
-- [ ] iOS EventKit integration (`EKEventStore` permissions & event creation)
-- [ ] Android Calendar Provider integration (`READ_CALENDAR`/`WRITE_CALENDAR`)
+- [x] **iOS / macOS:** Native Apple EventKit integration (`EKEventStore` authorization status check, write-only/full permission requests, default/writable calendar selection, and `EKEvent` creation) in `src-tauri/src/calendar_apple.m` and `src-tauri/src/calendar_apple.h`
+- [x] Objective-C to Rust FFI bridge (`src-tauri/src/calendar.rs`) with timezone-aware ISO/RFC3339 date parsing and fallback stubs for non-Apple targets
+- [x] Tauri IPC commands (`create_calendar_event`, `check_calendar_permission`, `request_calendar_permission`) in `src-tauri/src/lib.rs` and TypeScript service (`src/services/calendar.ts`, `src/services/event.ts`)
+- [x] iOS configuration (`EventKit.framework` dependency, `NSCalendarsUsageDescription`, and `NSCalendarsWriteOnlyAccessUsageDescription` in `src-tauri/gen/apple/project.yml` and `src-tauri/gen/apple/share2cal_iOS/Info.plist`)
+- [x] UI integration with direct native "Add to Calendar" button, loading state, permission handling, success/warning feedback, and `.ics` export backup (`src/App.vue`)
+- [ ] **Android:** Calendar Provider integration (`READ_CALENDAR`/`WRITE_CALENDAR`)
 - [x] Event review and edit modal in UI before committing to calendar (`src/App.vue`, `src/services/event.ts`)

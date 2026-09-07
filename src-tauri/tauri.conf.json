@@ -34,13 +34,15 @@
     "iOS": {
       "frameworks": [
         "Vision.framework",
-        "ImageIO.framework"
+        "ImageIO.framework",
+        "EventKit.framework"
       ]
     },
     "macOS": {
       "frameworks": [
         "Vision",
-        "ImageIO"
+        "ImageIO",
+        "EventKit"
       ]
     }
   }

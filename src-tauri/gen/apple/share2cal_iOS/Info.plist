@@ -31,6 +31,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Share2Cal uses your calendar to save events created from scanned images.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Share2Cal needs write access to save events directly to your calendar.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Share2Cal needs local network access to connect to the development server.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

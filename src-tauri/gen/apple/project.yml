@@ -12,7 +12,10 @@ settingGroups:
     base:
       PRODUCT_NAME: share2cal
       PRODUCT_BUNDLE_IDENTIFIER: com.dustinmichels.share2cal
-      DEVELOPMENT_TEAM: LLM5F36KYW
+      DEVELOPMENT_TEAM: HFXMJ5M53V
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: "Apple Development"
+      ENABLE_USER_SCRIPT_SANDBOXING: false
 targetTemplates:
   app:
     type: application
@@ -59,6 +62,9 @@ targets:
             CFBundleURLName: com.dustinmichels.share2cal
             CFBundleURLSchemes:
               - share2cal
+        NSCalendarsUsageDescription: "Share2Cal uses your calendar to save events created from scanned images."
+        NSCalendarsWriteOnlyAccessUsageDescription: "Share2Cal needs write access to save events directly to your calendar."
+        NSLocalNetworkUsageDescription: "Share2Cal needs local network access to connect to the development server."
     entitlements:
       path: share2cal_iOS/share2cal_iOS.entitlements
       properties:
@@ -71,6 +77,7 @@ targets:
     settings:
       base:
         ENABLE_BITCODE: false
+        ENABLE_USER_SCRIPT_SANDBOXING: false
         ARCHS: [arm64]
         VALID_ARCHS: arm64 
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
@@ -83,6 +90,7 @@ targets:
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework
+      - sdk: EventKit.framework
       - sdk: ImageIO.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
@@ -92,7 +100,7 @@ targets:
       - sdk: Vision.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: export PATH="$HOME/.local/share/mise/shims:$HOME/.local/share/mise/installs/node/latest/bin:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: "$SRCROOT/build_rust.sh"
         name: Build Rust Code
         basedOnDependencyAnalysis: false
         outputFiles:
@@ -124,9 +132,12 @@ targets:
       base:
         PRODUCT_NAME: ShareExtension
         PRODUCT_BUNDLE_IDENTIFIER: com.dustinmichels.share2cal.ShareExtension
-        DEVELOPMENT_TEAM: LLM5F36KYW
+        DEVELOPMENT_TEAM: HFXMJ5M53V
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
         INFOPLIST_FILE: ShareExtension/Info.plist
         ENABLE_BITCODE: false
+        ENABLE_USER_SCRIPT_SANDBOXING: false
         ARCHS: [arm64]
         VALID_ARCHS: arm64
     dependencies:

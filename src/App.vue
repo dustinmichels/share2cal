@@ -4,6 +4,7 @@ import { extractTextFromBytes, type OcrResult } from "./services/ocr";
 import {
   parseEventFromText,
   downloadIcsFile,
+  addEventToNativeCalendar,
   extractDateInput,
   extractTimeInput,
   buildIsoFromDateTime,
@@ -27,9 +28,11 @@ const isFromShareExtension = ref(false);
 const copiedOcr = ref(false);
 const copiedSummary = ref(false);
 const calendarDownloaded = ref(false);
+const isAddingToCalendar = ref(false);
+const calendarSuccessMessage = ref<string | null>(null);
+const calendarErrorMessage = ref<string | null>(null);
 const showOcrSection = ref(false);
 const showLineDetails = ref(false);
-
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const cameraInputRef = ref<HTMLInputElement | null>(null);
 
@@ -219,7 +222,38 @@ function getComposedEvent(): EventDetails {
   };
 }
 
-function handleAddToCalendar() {
+async function handleAddToCalendar() {
+  const event = getComposedEvent();
+  isAddingToCalendar.value = true;
+  calendarSuccessMessage.value = null;
+  calendarErrorMessage.value = null;
+  calendarDownloaded.value = false;
+
+  try {
+    const result = await addEventToNativeCalendar(event);
+    if (result.success) {
+      calendarSuccessMessage.value = `Event "${event.title}" was added directly to your Calendar!`;
+      setTimeout(() => {
+        calendarSuccessMessage.value = null;
+      }, 5000);
+    } else {
+      calendarErrorMessage.value = result.error || "Failed to add event to native calendar.";
+      // Fallback: download .ics file so the user never loses their event
+      downloadIcsFile(event);
+      setTimeout(() => {
+        calendarErrorMessage.value = null;
+      }, 6000);
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    calendarErrorMessage.value = msg;
+    downloadIcsFile(event);
+  } finally {
+    isAddingToCalendar.value = false;
+  }
+}
+
+function handleExportIcs() {
   const event = getComposedEvent();
   downloadIcsFile(event);
   calendarDownloaded.value = true;
@@ -260,6 +294,8 @@ function handleReset() {
   showLineDetails.value = false;
   showOcrSection.value = false;
   calendarDownloaded.value = false;
+  calendarSuccessMessage.value = null;
+  calendarErrorMessage.value = null;
   isFromShareExtension.value = false;
   shareNotification.value = null;
 }
@@ -477,7 +513,32 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Success / Download Notification Toast -->
+      <!-- Native Calendar Success Toast -->
+      <div v-if="calendarSuccessMessage" class="alert-box alert-success">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <div class="alert-content">
+          <span class="alert-title">Added to Calendar!</span>
+          <p class="alert-message">{{ calendarSuccessMessage }}</p>
+        </div>
+      </div>
+
+      <!-- Calendar Warning / Fallback Toast -->
+      <div v-if="calendarErrorMessage" class="alert-box alert-warning">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <div class="alert-content">
+          <span class="alert-title">Calendar Warning</span>
+          <p class="alert-message">{{ calendarErrorMessage }} An .ics file was exported as a backup.</p>
+        </div>
+      </div>
+
+      <!-- ICS Export Success Toast -->
       <div v-if="calendarDownloaded" class="alert-box alert-success">
         <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -488,7 +549,6 @@ onUnmounted(() => {
           <p class="alert-message">Your calendar event file was downloaded. Open it to add directly to Apple Calendar, Google Calendar, or Outlook.</p>
         </div>
       </div>
-
       <!-- Error State -->
       <div v-if="errorMessage" class="alert-box alert-error">
         <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -623,18 +683,38 @@ onUnmounted(() => {
           <button
             type="button"
             class="btn btn-add-calendar"
+            :disabled="isAddingToCalendar"
             @click="handleAddToCalendar"
           >
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="12" y1="11" x2="12" y2="17"></line>
-              <line x1="9" y1="14" x2="15" y2="14"></line>
-            </svg>
-            <span>Add to Calendar (.ics)</span>
+            <template v-if="isAddingToCalendar">
+              <span class="btn-spinner"></span>
+              <span>Adding to Calendar...</span>
+            </template>
+            <template v-else>
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="12" y1="11" x2="12" y2="17"></line>
+                <line x1="9" y1="14" x2="15" y2="14"></line>
+              </svg>
+              <span>Add to Calendar</span>
+            </template>
           </button>
 
+          <button
+            type="button"
+            class="btn btn-secondary-action"
+            title="Export standard .ics calendar file"
+            @click="handleExportIcs"
+          >
+            <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Export .ics</span>
+          </button>
           <button
             type="button"
             class="btn btn-copy"
@@ -970,6 +1050,36 @@ onUnmounted(() => {
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
 }
 
+.btn-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary-action:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.btn-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
 .btn-icon {
   width: 20px;
   height: 20px;
@@ -1250,6 +1360,12 @@ onUnmounted(() => {
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #991b1b;
+}
+
+.alert-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
 }
 
 .alert-icon {
@@ -1834,6 +1950,23 @@ onUnmounted(() => {
     background: #450a0a;
     border-color: #7f1d1d;
     color: #fca5a5;
+  }
+
+  .alert-warning {
+    background: #451a03;
+    border-color: #78350f;
+    color: #fde68a;
+  }
+
+  .btn-secondary-action {
+    background: #334155;
+    border-color: #475569;
+    color: #f1f5f9;
+  }
+
+  .btn-secondary-action:hover:not(:disabled) {
+    background: #475569;
+    color: #ffffff;
   }
 
   .share-banner {

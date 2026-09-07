@@ -4,6 +4,7 @@ fn main() {
         cc::Build::new()
             .file("src/ocr_apple.m")
             .file("src/share_apple.m")
+            .file("src/calendar_apple.m")
             .flag("-fobjc-arc")
             .compile("apple_native_bridge");
 
@@ -11,7 +12,10 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
         println!("cargo:rustc-link-lib=framework=ImageIO");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=EventKit");
     }
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=build.rs");
 
     tauri_build::build()
 }

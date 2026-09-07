@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export * from "./calendar";
+
 export interface EventDetails {
   title: string;
   start_time: string | null;

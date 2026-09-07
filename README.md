@@ -32,3 +32,26 @@ bun tauri ios dev
 ```sh
 sips -s format png samples/gilman_flyer.heif --out samples/gilman_flyer.png
 ```
+
+## Running on iphone
+
+```sh
+# open Xcode
+bun tauri ios dev --open
+bun run tauri ios dev --host
+
+# build
+bun run tauri ios build --open
+
+# or,
+bun run tauri ios dev --host --open
+```
+
+### Standalone Run (No Mac dev server needed)
+
+If you want the app installed on your iPhone running purely standalone (using the bundled static frontend):
+
+1.  In Xcode, go to Product > Scheme > Edit Scheme... (Cmd + <).
+2.  Select Run on the left sidebar.
+3.  Change Build Configuration from Debug to Release.
+4.  Click Close and press Run (▶) to build and deploy to your iPhone.

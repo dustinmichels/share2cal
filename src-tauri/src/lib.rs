@@ -1,7 +1,7 @@
+pub mod calendar;
 pub mod ocr;
 pub mod parser;
 pub mod share;
-
 use ocr::{extract_text_from_bytes, extract_text_from_path, OcrResult};
 use parser::{
     generate_extraction_prompt, get_gbnf_grammar, get_json_schema, parse_event_deterministic,
@@ -109,6 +109,20 @@ fn stage_shared_image(
     stage_shared(&bytes, &file_name, mime_type.as_deref())
 }
 
+#[tauri::command]
+fn create_calendar_event(event: EventDetails) -> Result<String, String> {
+    calendar::create_event(&event)
+}
+
+#[tauri::command]
+fn check_calendar_permission() -> Result<String, String> {
+    calendar::check_permission()
+}
+
+#[tauri::command]
+fn request_calendar_permission() -> Result<bool, String> {
+    calendar::request_permission()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -126,7 +140,10 @@ pub fn run() {
             generate_event_prompt,
             get_pending_shared_image,
             clear_pending_shared_image,
-            stage_shared_image
+            stage_shared_image,
+            create_calendar_event,
+            check_calendar_permission,
+            request_calendar_permission
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
