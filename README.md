@@ -40,11 +40,11 @@ sips -s format png samples/gilman_flyer.heif --out samples/gilman_flyer.png
 bun tauri ios dev --open
 bun run tauri ios dev --host
 
-# build
-bun run tauri ios build --open
-
 # or,
 bun run tauri ios dev --host --open
+
+# build
+bun run tauri ios build --open
 ```
 
 ### Standalone Run (No Mac dev server needed)

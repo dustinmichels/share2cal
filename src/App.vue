@@ -15,6 +15,7 @@ import {
   clearPendingSharedImage,
   payloadToFile,
 } from "./services/share";
+
 const selectedFile = ref<File | null>(null);
 const previewUrl = ref<string | null>(null);
 const isDragging = ref(false);
@@ -103,6 +104,7 @@ function setImageFile(file: File) {
   ocrResult.value = null;
   eventDetails.value = null;
   calendarDownloaded.value = false;
+  showOcrSection.value = false;
 }
 
 function handleFileInput(event: Event) {
@@ -266,7 +268,9 @@ async function copySummary() {
   const event = getComposedEvent();
   const lines = [
     `📅 ${event.title}`,
-    event.is_all_day ? `Date: ${eventForm.value.date} (All day)` : `Date & Time: ${eventForm.value.date} (${eventForm.value.startTime} - ${eventForm.value.endTime})`,
+    event.is_all_day
+      ? `Date: ${eventForm.value.date} (All day)`
+      : `Date & Time: ${eventForm.value.date} (${eventForm.value.startTime} - ${eventForm.value.endTime})`,
   ];
   if (event.location) lines.push(`📍 Location: ${event.location}`);
   if (event.description) lines.push(`📝 Notes: ${event.description}`);
@@ -312,6 +316,7 @@ async function copyOcrToClipboard() {
     console.error("Failed to copy OCR text:", err);
   }
 }
+
 async function checkPendingShare() {
   try {
     const pending = await getPendingSharedImage(true);
@@ -355,1643 +360,1634 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo-badge">
-        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="16" y1="2" x2="16" y2="6"></line>
-          <line x1="8" y1="2" x2="8" y2="6"></line>
-          <line x1="3" y1="10" x2="21" y2="10"></line>
-          <path d="M8 14h.01"></path>
-          <path d="M12 14h.01"></path>
-          <path d="M16 14h.01"></path>
-          <path d="M8 18h.01"></path>
-          <path d="M12 18h.01"></path>
-        </svg>
-      </div>
-      <h1 class="app-title">Share2Cal</h1>
-      <p class="app-tagline">Turn flyers, screenshots, and invitations into calendar events in seconds</p>
-    </header>
-
-    <!-- Share Notification Banner -->
-    <div v-if="shareNotification" class="share-banner">
-      <div class="share-banner-content">
-        <svg class="share-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-          <polyline points="16 6 12 2 8 6"></polyline>
-          <line x1="12" y1="2" x2="12" y2="15"></line>
-        </svg>
-        <span>{{ shareNotification }}</span>
-      </div>
-      <button type="button" class="btn-banner-close" @click="shareNotification = null" aria-label="Close notification">✕</button>
-    </div>
-
-    <!-- Hidden file inputs -->
-    <input
-      ref="fileInputRef"
-      type="file"
-      accept="image/*,.heic,.heif"
-      class="hidden-input"
-      @change="handleFileInput"
-    />
-    <input
-      ref="cameraInputRef"
-      type="file"
-      accept="image/*"
-      capture="environment"
-      class="hidden-input"
-      @change="handleCameraInput"
-    />
-
-    <!-- Upload / Capture Area (when no image selected) -->
-    <section
-      v-if="!selectedFile"
-      class="upload-zone"
-      :class="{ 'dragging': isDragging }"
-      @dragover="handleDragOver"
-      @dragleave="handleDragLeave"
-      @drop="handleDrop"
-    >
-      <div class="upload-zone-content">
-        <div class="upload-icon-circle">
-          <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
+  <div class="app-layout">
+    <main class="app-container">
+      <!-- App Header -->
+      <header class="app-header">
+        <div class="logo-badge">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+            <path d="M8 14h.01"></path>
+            <path d="M12 14h.01"></path>
+            <path d="M16 14h.01"></path>
+            <path d="M8 18h.01"></path>
+            <path d="M12 18h.01"></path>
           </svg>
         </div>
+        <h1 class="app-title">Share2Cal</h1>
+        <p class="app-tagline">Turn flyers and invitations into calendar events in seconds</p>
+      </header>
 
-        <h2 class="upload-heading">Select an image to get started</h2>
-        <p class="upload-subtext">Drop your flyer, screenshot, or invitation here</p>
-
-        <div class="action-buttons-group">
-          <button type="button" class="btn btn-primary" @click="triggerFileUpload">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <circle cx="8.5" cy="8.5" r="1.5"></circle>
-              <polyline points="21 15 16 10 5 21"></polyline>
-            </svg>
-            <span>Upload Image</span>
-          </button>
-
-          <button type="button" class="btn btn-secondary" @click="triggerCameraCapture">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-              <circle cx="12" cy="13" r="4"></circle>
-            </svg>
-            <span>Take Picture</span>
-          </button>
+      <!-- Share Notification Banner -->
+      <div v-if="shareNotification" class="toast-banner toast-info">
+        <div class="toast-icon-wrap">
+          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="16 6 12 2 8 6"></polyline>
+            <line x1="12" y1="2" x2="12" y2="15"></line>
+          </svg>
         </div>
-
-        <p class="paste-hint">Supports PNG, JPG, HEIF • You can also paste from clipboard (⌘V)</p>
-      </div>
-    </section>
-
-    <!-- Image Selected State -->
-    <section v-else class="selected-state-section">
-      <!-- Preview Card -->
-      <div class="card preview-card">
-        <div class="preview-header">
-          <div class="file-meta">
-            <div class="file-meta-top">
-              <span class="file-name" :title="selectedFile.name">{{ selectedFile.name }}</span>
-              <span v-if="isFromShareExtension" class="badge badge-share">
-                <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                  <polyline points="16 6 12 2 8 6"></polyline>
-                  <line x1="12" y1="2" x2="12" y2="15"></line>
-                </svg>
-                iOS Share
-              </span>
-            </div>
-            <span class="file-size">{{ formatFileSize(selectedFile.size) }}</span>
-          </div>
-          <button type="button" class="btn-text-danger" :disabled="isProcessing" @click="handleReset">
-            <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-            <span>Remove</span>
-          </button>
-        </div>
-
-        <div class="preview-container">
-          <img v-if="previewUrl" :src="previewUrl" alt="Selected image preview" class="preview-image" />
-        </div>
-
-        <!-- Go Button Bar -->
-        <div class="action-bar">
-          <button
-            type="button"
-            class="btn btn-go"
-            :disabled="isProcessing"
-            @click="handleGo"
-          >
-            <template v-if="!isProcessing">
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span>{{ eventDetails ? 'Re-scan & Extract' : 'Scan & Extract Event' }}</span>
-            </template>
-            <template v-else>
-              <div class="spinner"></div>
-              <span>Scanning OCR & Extracting Event...</span>
-            </template>
-          </button>
-
-          <div class="alt-actions">
-            <button type="button" class="btn-link" :disabled="isProcessing" @click="triggerFileUpload">
-              Choose another
-            </button>
-            <span class="dot-separator">•</span>
-            <button type="button" class="btn-link" :disabled="isProcessing" @click="triggerCameraCapture">
-              Take new photo
-            </button>
-          </div>
-        </div>
+        <span class="toast-text">{{ shareNotification }}</span>
+        <button type="button" class="btn-toast-close" @click="shareNotification = null" aria-label="Close notification">✕</button>
       </div>
 
       <!-- Native Calendar Success Toast -->
-      <div v-if="calendarSuccessMessage" class="alert-box alert-success">
-        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-        </svg>
-        <div class="alert-content">
-          <span class="alert-title">Added to Calendar!</span>
-          <p class="alert-message">{{ calendarSuccessMessage }}</p>
+      <div v-if="calendarSuccessMessage" class="toast-banner toast-success">
+        <div class="toast-icon-wrap">
+          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
         </div>
+        <div class="toast-body">
+          <span class="toast-heading">Added to Calendar</span>
+          <span class="toast-text">{{ calendarSuccessMessage }}</span>
+        </div>
+        <button type="button" class="btn-toast-close" @click="calendarSuccessMessage = null" aria-label="Close">✕</button>
       </div>
 
       <!-- Calendar Warning / Fallback Toast -->
-      <div v-if="calendarErrorMessage" class="alert-box alert-warning">
-        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-        <div class="alert-content">
-          <span class="alert-title">Calendar Warning</span>
-          <p class="alert-message">{{ calendarErrorMessage }} An .ics file was exported as a backup.</p>
+      <div v-if="calendarErrorMessage" class="toast-banner toast-warning">
+        <div class="toast-icon-wrap">
+          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
         </div>
+        <div class="toast-body">
+          <span class="toast-heading">Calendar Notice</span>
+          <span class="toast-text">{{ calendarErrorMessage }} (.ics exported)</span>
+        </div>
+        <button type="button" class="btn-toast-close" @click="calendarErrorMessage = null" aria-label="Close">✕</button>
       </div>
 
       <!-- ICS Export Success Toast -->
-      <div v-if="calendarDownloaded" class="alert-box alert-success">
-        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-        </svg>
-        <div class="alert-content">
-          <span class="alert-title">Calendar File (.ics) Exported!</span>
-          <p class="alert-message">Your calendar event file was downloaded. Open it to add directly to Apple Calendar, Google Calendar, or Outlook.</p>
+      <div v-if="calendarDownloaded" class="toast-banner toast-success">
+        <div class="toast-icon-wrap">
+          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
         </div>
-      </div>
-      <!-- Error State -->
-      <div v-if="errorMessage" class="alert-box alert-error">
-        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-        <div class="alert-content">
-          <span class="alert-title">Processing Error</span>
-          <p class="alert-message">{{ errorMessage }}</p>
+        <div class="toast-body">
+          <span class="toast-heading">Calendar File (.ics) Exported</span>
+          <span class="toast-text">Open the downloaded file to add to Apple Calendar, Google, or Outlook.</span>
         </div>
+        <button type="button" class="btn-toast-close" @click="calendarDownloaded = false" aria-label="Close">✕</button>
       </div>
 
-      <!-- Event Review & Edit Card -->
-      <div v-if="eventDetails" class="card event-card">
-        <div class="event-header">
-          <div class="event-title-group">
-            <div class="event-icon-badge">
-              <svg class="event-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="16" y1="2" x2="16" y2="6"></line>
-                <line x1="8" y1="2" x2="8" y2="6"></line>
-                <line x1="3" y1="10" x2="21" y2="10"></line>
-              </svg>
-            </div>
-            <div>
-              <h2 class="event-card-heading">Event Details</h2>
-              <p class="event-card-subheading">Review and edit before adding to your calendar</p>
-            </div>
-          </div>
-
-          <div class="event-badges-group">
-            <span class="badge badge-accent">{{ eventConfidencePercent }}% confidence</span>
-            <span class="badge badge-secondary">{{ eventDetails.source === 'deterministic' ? 'Heuristic Parser' : 'LLM' }}</span>
-          </div>
+      <!-- General Error Toast -->
+      <div v-if="errorMessage" class="toast-banner toast-error">
+        <div class="toast-icon-wrap">
+          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
         </div>
-
-        <!-- Form fields -->
-        <div class="event-form">
-          <!-- Title -->
-          <div class="form-group">
-            <label class="form-label" for="event-title">Event Title</label>
-            <input
-              id="event-title"
-              v-model="eventForm.title"
-              type="text"
-              class="form-input form-input-lg"
-              placeholder="Event name"
-            />
-          </div>
-
-          <!-- Date & All-day row -->
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label class="form-label" for="event-date">Date</label>
-              <input
-                id="event-date"
-                v-model="eventForm.date"
-                type="date"
-                class="form-input"
-              />
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label class="checkbox-label" for="event-allday">
-                <input
-                  id="event-allday"
-                  v-model="eventForm.isAllDay"
-                  type="checkbox"
-                  class="form-checkbox"
-                />
-                <span>All-day</span>
-              </label>
-            </div>
-          </div>
-
-          <!-- Time row (when not all-day) -->
-          <div v-if="!eventForm.isAllDay" class="form-row">
-            <div class="form-group flex-1">
-              <label class="form-label" for="event-start">Start Time</label>
-              <input
-                id="event-start"
-                v-model="eventForm.startTime"
-                type="time"
-                class="form-input"
-              />
-            </div>
-            <div class="form-group flex-1">
-              <label class="form-label" for="event-end">End Time</label>
-              <input
-                id="event-end"
-                v-model="eventForm.endTime"
-                type="time"
-                class="form-input"
-              />
-            </div>
-          </div>
-
-          <!-- Location -->
-          <div class="form-group">
-            <label class="form-label" for="event-location">Location / Venue</label>
-            <div class="input-with-icon">
-              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                <circle cx="12" cy="10" r="3"></circle>
-              </svg>
-              <input
-                id="event-location"
-                v-model="eventForm.location"
-                type="text"
-                class="form-input icon-padded"
-                placeholder="Venue name, address, or Zoom link"
-              />
-            </div>
-          </div>
-
-          <!-- Description / Notes -->
-          <div class="form-group">
-            <label class="form-label" for="event-description">Description & Notes</label>
-            <textarea
-              id="event-description"
-              v-model="eventForm.description"
-              class="form-textarea"
-              rows="3"
-              placeholder="Performers, food, activities, notes..."
-            ></textarea>
-          </div>
+        <div class="toast-body">
+          <span class="toast-heading">Processing Notice</span>
+          <span class="toast-text">{{ errorMessage }}</span>
         </div>
+        <button type="button" class="btn-toast-close" @click="errorMessage = null" aria-label="Close">✕</button>
+      </div>
 
-        <!-- Event Action Bar -->
-        <div class="event-action-bar">
-          <button
-            type="button"
-            class="btn btn-add-calendar"
-            :disabled="isAddingToCalendar"
-            @click="handleAddToCalendar"
-          >
-            <template v-if="isAddingToCalendar">
-              <span class="btn-spinner"></span>
-              <span>Adding to Calendar...</span>
-            </template>
-            <template v-else>
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="16" y1="2" x2="16" y2="6"></line>
-                <line x1="8" y1="2" x2="8" y2="6"></line>
-                <line x1="12" y1="11" x2="12" y2="17"></line>
-                <line x1="9" y1="14" x2="15" y2="14"></line>
-              </svg>
-              <span>Add to Calendar</span>
-            </template>
-          </button>
+      <!-- Hidden file inputs -->
+      <input
+        ref="fileInputRef"
+        type="file"
+        accept="image/*,.heic,.heif"
+        class="hidden-input"
+        @change="handleFileInput"
+      />
+      <input
+        ref="cameraInputRef"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        class="hidden-input"
+        @change="handleCameraInput"
+      />
 
-          <button
-            type="button"
-            class="btn btn-secondary-action"
-            title="Export standard .ics calendar file"
-            @click="handleExportIcs"
-          >
-            <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+      <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
+      <section
+        v-if="!selectedFile"
+        class="upload-hub"
+        :class="{ 'is-dragging': isDragging }"
+        @dragover="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop"
+      >
+        <div class="upload-hero">
+          <div class="upload-icon-bubble">
+            <svg class="upload-bubble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
             </svg>
-            <span>Export .ics</span>
+          </div>
+          <h2 class="upload-title">Add Flyer or Screenshot</h2>
+          <p class="upload-subtitle">Choose a photo or snap a picture of an event flyer, invite, or schedule.</p>
+        </div>
+
+        <div class="upload-actions">
+          <button type="button" class="btn-touch btn-touch-primary" @click="triggerFileUpload">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>Choose from Library</span>
           </button>
-          <button
-            type="button"
-            class="btn btn-copy"
-            :class="{ 'copied': copiedSummary }"
-            @click="copySummary"
-          >
-            <template v-if="copiedSummary">
-              <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-              <span>Copied!</span>
-            </template>
-            <template v-else>
-              <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span>Copy Summary</span>
-            </template>
+
+          <button type="button" class="btn-touch btn-touch-secondary" @click="triggerCameraCapture">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+            <span>Take Photo</span>
           </button>
         </div>
-      </div>
 
-      <!-- Collapsible OCR Result Card -->
-      <div v-if="ocrResult" class="card result-card">
-        <div class="result-header">
-          <div class="result-title-group">
-            <h3 class="result-title">Raw OCR Detection</h3>
-            <div class="badges-group">
-              <span class="badge badge-primary">{{ ocrResult.lines.length }} lines</span>
-              <span class="badge badge-secondary">{{ wordCount }} words</span>
-              <span v-if="averageConfidence > 0" class="badge badge-accent">{{ averageConfidence }}% conf</span>
+        <div class="upload-footer">
+          <p class="format-note">Supports PNG, JPG, HEIF • Also paste images via ⌘V</p>
+        </div>
+      </section>
+
+      <!-- STATE 2: Image Selected & Event Extracted State -->
+      <section v-else class="content-flow">
+        <!-- Hero Preview & Scanner Card -->
+        <div class="surface-card preview-card">
+          <div class="preview-top-bar">
+            <div class="preview-meta">
+              <span class="preview-file-name" :title="selectedFile.name">{{ selectedFile.name }}</span>
+              <div class="preview-chips">
+                <span class="chip-size">{{ formatFileSize(selectedFile.size) }}</span>
+                <span v-if="isFromShareExtension" class="chip-share">
+                  <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                    <polyline points="16 6 12 2 8 6"></polyline>
+                    <line x1="12" y1="2" x2="12" y2="15"></line>
+                  </svg>
+                  iOS Share
+                </span>
+              </div>
             </div>
+
+            <button type="button" class="btn-pill-danger" :disabled="isProcessing" @click="handleReset" aria-label="Remove photo">
+              <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Remove</span>
+            </button>
           </div>
 
-          <div class="ocr-actions">
-            <button
-              type="button"
-              class="btn-text-action"
-              @click="handleReparse"
-            >
-              <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-              </svg>
-              <span>Re-parse</span>
-            </button>
+          <div class="image-stage">
+            <img v-if="previewUrl" :src="previewUrl" alt="Selected flyer preview" class="stage-img" />
+          </div>
 
+          <div class="scanner-action-wrap">
             <button
               type="button"
-              class="btn btn-copy"
-              :class="{ 'copied': copiedOcr }"
-              :disabled="!ocrResult.text.trim()"
-              @click="copyOcrToClipboard"
+              class="btn-touch btn-touch-scan"
+              :class="{ 'is-loading': isProcessing }"
+              :disabled="isProcessing"
+              @click="handleGo"
             >
-              <template v-if="copiedOcr">
-                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
+              <template v-if="!isProcessing">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
                 </svg>
-                <span>Copied!</span>
+                <span>{{ eventDetails ? 'Re-scan & Extract' : 'Scan Flyer & Extract Event' }}</span>
               </template>
               <template v-else>
-                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span>Copy OCR</span>
+                <div class="spinner-circle"></div>
+                <span>Scanning Flyer...</span>
               </template>
             </button>
+
+            <div class="quick-switch-bar">
+              <button type="button" class="btn-subtle-link" :disabled="isProcessing" @click="triggerFileUpload">
+                Choose another photo
+              </button>
+              <span class="quick-dot">•</span>
+              <button type="button" class="btn-subtle-link" :disabled="isProcessing" @click="triggerCameraCapture">
+                Take new photo
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="result-body">
-          <textarea
-            readonly
-            class="ocr-textarea"
-            :value="ocrResult.text"
-            rows="6"
-            placeholder="No text detected."
-          ></textarea>
+        <!-- Event Details Form Section -->
+        <div v-if="eventDetails" class="surface-card event-section">
+          <div class="section-header">
+            <div class="section-title-wrap">
+              <div class="section-icon-bubble">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="section-heading">Event Details</h2>
+                <p class="section-subheading">Review and adjust before adding to calendar</p>
+              </div>
+            </div>
+
+            <div class="confidence-pill-wrap">
+              <span class="badge-pill badge-pill-confidence">{{ eventConfidencePercent }}% match</span>
+            </div>
+          </div>
+
+          <!-- Grouped Form Fields -->
+          <div class="grouped-form">
+            <!-- Event Title Field -->
+            <div class="field-item">
+              <label class="field-label" for="event-title">Title</label>
+              <input
+                id="event-title"
+                v-model="eventForm.title"
+                type="text"
+                class="field-input field-input-bold"
+                placeholder="Event name"
+              />
+            </div>
+
+            <!-- Date & All-Day Switch Row -->
+            <div class="field-row">
+              <div class="field-item flex-grow">
+                <label class="field-label" for="event-date">Date</label>
+                <input
+                  id="event-date"
+                  v-model="eventForm.date"
+                  type="date"
+                  class="field-input field-input-date"
+                />
+              </div>
+
+              <div class="field-item field-item-toggle">
+                <label class="toggle-control" for="event-allday">
+                  <span class="toggle-label-text">All-day</span>
+                  <div class="switch-wrap">
+                    <input
+                      id="event-allday"
+                      v-model="eventForm.isAllDay"
+                      type="checkbox"
+                      class="switch-input"
+                    />
+                    <span class="switch-slider"></span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Start / End Time Row (if not all-day) -->
+            <div v-if="!eventForm.isAllDay" class="time-grid">
+              <div class="field-item">
+                <label class="field-label" for="event-start">Starts</label>
+                <input
+                  id="event-start"
+                  v-model="eventForm.startTime"
+                  type="time"
+                  class="field-input field-input-time"
+                />
+              </div>
+
+              <div class="field-item">
+                <label class="field-label" for="event-end">Ends</label>
+                <input
+                  id="event-end"
+                  v-model="eventForm.endTime"
+                  type="time"
+                  class="field-input field-input-time"
+                />
+              </div>
+            </div>
+
+            <!-- Location Field -->
+            <div class="field-item">
+              <label class="field-label" for="event-location">Location</label>
+              <div class="input-icon-shell">
+                <svg class="input-inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                  <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <input
+                  id="event-location"
+                  v-model="eventForm.location"
+                  type="text"
+                  class="field-input field-input-with-icon"
+                  placeholder="Venue, address, or link"
+                />
+              </div>
+            </div>
+
+            <!-- Description & Notes Field -->
+            <div class="field-item">
+              <label class="field-label" for="event-description">Notes & Description</label>
+              <textarea
+                id="event-description"
+                v-model="eventForm.description"
+                class="field-textarea"
+                rows="3"
+                placeholder="Performers, details, notes..."
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- Event Action Cluster -->
+          <div class="event-actions-flow">
+            <button
+              type="button"
+              class="btn-touch btn-touch-calendar"
+              :disabled="isAddingToCalendar"
+              @click="handleAddToCalendar"
+            >
+              <template v-if="isAddingToCalendar">
+                <div class="spinner-circle spinner-light"></div>
+                <span>Adding to Calendar...</span>
+              </template>
+              <template v-else>
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="12" y1="11" x2="12" y2="17"></line>
+                  <line x1="9" y1="14" x2="15" y2="14"></line>
+                </svg>
+                <span>Add to Calendar</span>
+              </template>
+            </button>
+
+            <div class="secondary-button-row">
+              <button
+                type="button"
+                class="btn-touch btn-touch-outline"
+                @click="handleExportIcs"
+              >
+                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Export .ics</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn-touch btn-touch-outline"
+                :class="{ 'is-copied': copiedSummary }"
+                @click="copySummary"
+              >
+                <template v-if="copiedSummary">
+                  <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Copied!</span>
+                </template>
+                <template v-else>
+                  <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy Summary</span>
+                </template>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <!-- Line by Line breakdown -->
-        <div v-if="ocrResult.lines.length > 0" class="line-breakdown-section">
+        <!-- Collapsible Raw OCR Diagnostics Drawer -->
+        <div v-if="ocrResult" class="surface-card ocr-accordion">
           <button
             type="button"
-            class="line-details-toggle"
-            @click="showLineDetails = !showLineDetails"
+            class="accordion-trigger"
+            @click="showOcrSection = !showOcrSection"
           >
+            <div class="accordion-title-wrap">
+              <svg class="accordion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 7 4 4 20 4 20 7"></polyline>
+                <line x1="9" y1="20" x2="15" y2="20"></line>
+                <line x1="12" y1="4" x2="12" y2="20"></line>
+              </svg>
+              <span class="accordion-title">Extracted OCR Text</span>
+              <span class="chip-count">{{ ocrResult.lines.length }} lines • {{ wordCount }} words • {{ averageConfidence }}% conf</span>
+            </div>
+
             <svg
-              class="toggle-chevron"
-              :class="{ 'rotated': showLineDetails }"
+              class="accordion-chevron"
+              :class="{ 'is-open': showOcrSection }"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              stroke-width="2"
+              stroke-width="2.2"
               stroke-linecap="round"
               stroke-linejoin="round"
             >
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
-            <span>{{ showLineDetails ? 'Hide' : 'Show' }} line-by-line confidence details</span>
           </button>
 
-          <div v-if="showLineDetails" class="lines-container">
-            <ul class="lines-list">
-              <li v-for="(line, idx) in ocrResult.lines" :key="idx" class="line-row">
-                <span class="line-number">{{ idx + 1 }}</span>
-                <span class="line-text">{{ line.text }}</span>
-                <span
-                  class="line-confidence"
-                  :class="{
-                    'conf-high': line.confidence >= 0.8,
-                    'conf-med': line.confidence >= 0.5 && line.confidence < 0.8,
-                    'conf-low': line.confidence < 0.5
-                  }"
+          <div v-if="showOcrSection" class="accordion-content">
+            <div class="ocr-toolbar">
+              <button
+                type="button"
+                class="btn-subtle-tool"
+                @click="handleReparse"
+              >
+                <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+                <span>Re-parse</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn-subtle-tool"
+                :class="{ 'is-copied': copiedOcr }"
+                :disabled="!ocrResult.text.trim()"
+                @click="copyOcrToClipboard"
+              >
+                <template v-if="copiedOcr">
+                  <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Copied Text</span>
+                </template>
+                <template v-else>
+                  <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy OCR</span>
+                </template>
+              </button>
+            </div>
+
+            <textarea
+              readonly
+              class="ocr-raw-display"
+              :value="ocrResult.text"
+              rows="5"
+              placeholder="No text detected."
+            ></textarea>
+
+            <!-- Line Details Toggle -->
+            <div v-if="ocrResult.lines.length > 0" class="line-details-block">
+              <button
+                type="button"
+                class="btn-line-toggle"
+                @click="showLineDetails = !showLineDetails"
+              >
+                <span>{{ showLineDetails ? 'Hide' : 'Show' }} line-by-line confidence</span>
+                <svg
+                  class="btn-icon-xs chevron-sm"
+                  :class="{ 'is-rotated': showLineDetails }"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
                 >
-                  {{ Math.round(line.confidence * 100) }}%
-                </span>
-              </li>
-            </ul>
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+
+              <div v-if="showLineDetails" class="line-breakdown-list">
+                <div v-for="(line, idx) in ocrResult.lines" :key="idx" class="line-item">
+                  <span class="line-idx">{{ idx + 1 }}</span>
+                  <span class="line-content">{{ line.text }}</span>
+                  <span
+                    class="line-score"
+                    :class="{
+                      'score-high': line.confidence >= 0.8,
+                      'score-med': line.confidence >= 0.5 && line.confidence < 0.8,
+                      'score-low': line.confidence < 0.5
+                    }"
+                  >
+                    {{ Math.round(line.confidence * 100) }}%
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
-  </main>
+      </section>
+    </main>
+  </div>
 </template>
 
 <style scoped>
+/* Theme Variables & Layout Foundation */
+.app-layout {
+  --bg-page: #f2f2f7;
+  --bg-card: #ffffff;
+  --bg-card-elevated: #ffffff;
+  --bg-input: #f8f9fa;
+  --bg-input-focus: #ffffff;
+  --border-card: rgba(0, 0, 0, 0.06);
+  --border-card-subtle: rgba(0, 0, 0, 0.04);
+  --border-input: #e2e8f0;
+  --border-input-focus: #007aff;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary: #9ca3af;
+  --accent-primary: #007aff;
+  --accent-primary-hover: #0066d6;
+  --accent-green: #34c759;
+  --accent-green-hover: #2db84d;
+  --accent-danger: #ff3b30;
+  --accent-danger-bg: #fee2e2;
+  --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+  --shadow-primary-btn: 0 4px 14px rgba(0, 122, 255, 0.25);
+  --shadow-green-btn: 0 4px 14px rgba(52, 199, 89, 0.28);
+  --radius-card: 20px;
+  --radius-input: 12px;
+  --radius-btn: 14px;
+  
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-layout {
+    --bg-page: #0b0f17;
+    --bg-card: #161b26;
+    --bg-card-elevated: #1e2433;
+    --bg-input: #10141d;
+    --bg-input-focus: #0d1017;
+    --border-card: rgba(255, 255, 255, 0.08);
+    --border-card-subtle: rgba(255, 255, 255, 0.05);
+    --border-input: #283141;
+    --border-input-focus: #388bfd;
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    --text-tertiary: #6b7280;
+    --accent-primary: #0a84ff;
+    --accent-primary-hover: #0071e3;
+    --accent-green: #30d158;
+    --accent-green-hover: #28b84d;
+    --accent-danger: #ff453a;
+    --accent-danger-bg: rgba(255, 69, 58, 0.15);
+    --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-card: 0 4px 24px -2px rgba(0, 0, 0, 0.5), 0 2px 8px -1px rgba(0, 0, 0, 0.3);
+    --shadow-primary-btn: 0 4px 16px rgba(10, 132, 255, 0.35);
+    --shadow-green-btn: 0 4px 16px rgba(48, 209, 88, 0.35);
+  }
+}
+
 .app-container {
-  max-width: 640px;
+  width: 100%;
+  max-width: 580px;
   margin: 0 auto;
-  padding: 2rem 1.25rem;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #111827;
-  box-sizing: border-box;
+  padding: max(1.25rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 /* Header */
 .app-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  margin-bottom: 2rem;
+  padding: 0.5rem 0.5rem 0.25rem;
 }
 
 .logo-badge {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   background: linear-gradient(135deg, #007aff 0%, #5856d6 100%);
   border-radius: 14px;
-  color: white;
+  color: #ffffff;
   margin-bottom: 0.75rem;
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.3);
 }
 
 .logo-icon {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
 }
 
 .app-title {
-  font-size: 2rem;
+  font-size: 1.75rem;
   font-weight: 800;
-  letter-spacing: -0.025em;
-  margin: 0 0 0.4rem 0;
-  color: #111827;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.35rem 0;
+  color: var(--text-primary);
+  line-height: 1.2;
 }
 
 .app-tagline {
-  font-size: 0.95rem;
-  color: #6b7280;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
   margin: 0;
   line-height: 1.4;
+  max-width: 380px;
 }
 
-/* Hidden inputs */
+/* Hidden Inputs */
 .hidden-input {
   display: none;
 }
 
-/* Card generic */
-.card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 1.25rem;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  margin-bottom: 1.25rem;
-}
-
-/* Upload Zone */
-.upload-zone {
-  border: 2px dashed #cbd5e1;
-  border-radius: 16px;
-  background: #f8fafc;
-  padding: 2.5rem 1.5rem;
-  text-align: center;
-  transition: all 0.2s ease-in-out;
-}
-
-.upload-zone.dragging {
-  border-color: #007aff;
-  background: #eff6ff;
-  transform: scale(1.01);
-}
-
-.upload-zone-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.upload-icon-circle {
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: #e0f2fe;
-  color: #007aff;
+/* Toast Banners */
+.toast-banner {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-.upload-icon {
-  width: 30px;
-  height: 30px;
-}
-
-.upload-heading {
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin: 0 0 0.35rem 0;
-  color: #1e293b;
-}
-
-.upload-subtext {
-  font-size: 0.9rem;
-  color: #64748b;
-  margin: 0 0 1.5rem 0;
-}
-
-.action-buttons-group {
-  display: flex;
   gap: 0.75rem;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-bottom: 1.25rem;
-}
-
-.paste-hint {
-  font-size: 0.8rem;
-  color: #94a3b8;
-  margin: 0;
-}
-
-/* Buttons */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.7rem 1.25rem;
-  border-radius: 10px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-}
-
-.btn:active {
-  transform: scale(0.98);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn-primary {
-  background: #007aff;
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.25);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #0066d6;
-}
-
-.btn-secondary {
-  background: #f1f5f9;
-  color: #1e293b;
-  border: 1px solid #e2e8f0;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #e2e8f0;
-}
-
-.btn-go {
-  width: 100%;
-  padding: 0.9rem 1.5rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #007aff 0%, #0056b3 100%);
-  color: white;
-  border-radius: 12px;
-  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.35);
-  letter-spacing: 0.01em;
-}
-
-.btn-go:hover:not(:disabled) {
-  background: linear-gradient(135deg, #006ee6 0%, #004c9e 100%);
-  box-shadow: 0 6px 18px rgba(0, 122, 255, 0.4);
-}
-
-.btn-add-calendar {
-  flex: 1;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  padding: 0.8rem 1.25rem;
-  font-weight: 700;
-  border-radius: 10px;
-  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3);
-}
-
-.btn-add-calendar:hover:not(:disabled) {
-  background: linear-gradient(135deg, #059669 0%, #047857 100%);
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
-}
-
-.btn-secondary-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  color: #475569;
-  padding: 0.8rem 1rem;
-  border-radius: 10px;
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-secondary-action:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: #1e293b;
-}
-
-.btn-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: #ffffff;
-  animation: spin 0.8s linear infinite;
-  display: inline-block;
-}
-
-.btn-icon {
-  width: 20px;
-  height: 20px;
-}
-
-.btn-icon-sm {
-  width: 16px;
-  height: 16px;
-}
-
-.btn-text-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: transparent;
-  border: none;
-  color: #ef4444;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-}
-
-.btn-text-danger:hover:not(:disabled) {
-  background: #fee2e2;
-}
-
-.btn-text-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: transparent;
-  border: 1px solid #e2e8f0;
-  color: #475569;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0.4rem 0.75rem;
-  border-radius: 8px;
-}
-
-.btn-text-action:hover:not(:disabled) {
-  background: #f1f5f9;
-  color: #1e293b;
-}
-
-.btn-link {
-  background: transparent;
-  border: none;
-  color: #007aff;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0.25rem 0.4rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.btn-link:hover:not(:disabled) {
-  color: #0056b3;
-}
-
-.btn-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  color: #1e293b;
-  font-size: 0.85rem;
-  font-weight: 600;
-  padding: 0.4rem 0.75rem;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-copy:hover:not(:disabled) {
-  background: #e2e8f0;
-}
-
-.btn-copy.copied {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-  color: #059669;
-}
-
-/* Preview Card */
-.preview-card {
-  padding: 1.25rem;
-}
-
-.share-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1.25rem;
-  color: #1d4ed8;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
   font-size: 0.88rem;
-  font-weight: 500;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.08);
-  animation: slideIn 0.25s ease-out;
+  animation: toastSlideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-subtle);
 }
 
-@keyframes slideIn {
+@keyframes toastSlideDown {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-6px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
-.share-banner-content {
+.toast-icon-wrap {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-}
-
-.share-banner-icon {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  color: #2563eb;
-}
-
-.btn-banner-close {
-  background: none;
-  border: none;
-  font-size: 1rem;
-  color: #60a5fa;
-  cursor: pointer;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.btn-banner-close:hover {
-  color: #1e40af;
-  background: #dbeafe;
-}
-
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.85rem;
-}
-
-.file-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  overflow: hidden;
-}
-
-.file-meta-top {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.file-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #334155;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 240px;
-}
-
-.file-size {
-  font-size: 0.8rem;
-  color: #94a3b8;
-  background: #f1f5f9;
-  padding: 0.15rem 0.45rem;
-  border-radius: 4px;
-  align-self: flex-start;
-}
-
-.badge-share {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #2563eb;
-  background: #dbeafe;
-  border: 1px solid #bfdbfe;
-  padding: 0.15rem 0.45rem;
-  border-radius: 12px;
-}
-
-.badge-icon {
-  width: 12px;
-  height: 12px;
-}
-
-.preview-container {
-  display: flex;
   justify-content: center;
-  align-items: center;
-  background: #0f172a;
-  border-radius: 10px;
-  overflow: hidden;
-  max-height: 380px;
-  margin-bottom: 1.25rem;
+  flex-shrink: 0;
 }
 
-.preview-image {
-  max-width: 100%;
-  max-height: 380px;
-  object-fit: contain;
-  display: block;
-}
-
-.action-bar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.alt-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  color: #94a3b8;
-}
-
-.dot-separator {
-  color: #cbd5e1;
-}
-
-/* Spinner */
-.spinner {
+.toast-icon {
   width: 20px;
   height: 20px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: #ffffff;
-  animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Alert Box */
-.alert-box {
+.toast-body {
   display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem;
-  border-radius: 12px;
-  margin-bottom: 1.25rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
 }
 
-.alert-success {
+.toast-heading {
+  font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.toast-text {
+  font-size: 0.84rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.btn-toast-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+  margin-left: auto;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.btn-toast-close:hover {
+  opacity: 1;
+}
+
+.toast-info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.toast-success {
   background: #ecfdf5;
   border: 1px solid #a7f3d0;
   color: #065f46;
 }
 
-.alert-error {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-}
-
-.alert-warning {
+.toast-warning {
   background: #fffbeb;
   border: 1px solid #fde68a;
   color: #92400e;
 }
 
-.alert-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  margin-top: 0.1rem;
+.toast-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
 }
 
-.alert-content {
-  flex: 1;
+@media (prefers-color-scheme: dark) {
+  .toast-info {
+    background: #172554;
+    border-color: #1e40af;
+    color: #93c5fd;
+  }
+  .toast-success {
+    background: #064e3b;
+    border-color: #047857;
+    color: #a7f3d0;
+  }
+  .toast-warning {
+    background: #451a03;
+    border-color: #78350f;
+    color: #fde68a;
+  }
+  .toast-error {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
 }
 
-.alert-title {
-  display: block;
-  font-weight: 700;
-  font-size: 0.9rem;
-  margin-bottom: 0.2rem;
-}
-
-.alert-message {
-  font-size: 0.85rem;
-  margin: 0;
-  line-height: 1.4;
-}
-
-/* Event Card */
-.event-card {
-  padding: 1.5rem;
-  border: 2px solid #e0e7ff;
-  background: linear-gradient(180deg, #ffffff 0%, #fafbff 100%);
-}
-
-.event-header {
+/* Surface Cards (Clean iOS Grouped Surface) */
+.surface-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-card);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-card);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  flex-direction: column;
+  gap: 1.25rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.event-title-group {
+/* Upload Hub (Empty State) */
+.upload-hub {
+  background: var(--bg-card);
+  border: 1.5px dashed var(--border-input);
+  border-radius: var(--radius-card);
+  padding: 2.25rem 1.25rem;
+  text-align: center;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.5rem;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s ease;
 }
 
-.event-icon-badge {
+.upload-hub.is-dragging {
+  border-color: var(--accent-primary);
+  background: rgba(0, 122, 255, 0.05);
+  transform: scale(1.01);
+}
+
+.upload-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 380px;
+}
+
+.upload-icon-bubble {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  background: #e0e7ff;
-  color: #4f46e5;
-  border-radius: 10px;
+  margin-bottom: 1rem;
 }
 
-.event-header-icon {
-  width: 22px;
-  height: 22px;
+.upload-bubble-icon {
+  width: 32px;
+  height: 32px;
 }
 
-.event-card-heading {
+.upload-title {
   font-size: 1.25rem;
   font-weight: 700;
-  margin: 0 0 0.2rem 0;
-  color: #1e293b;
+  margin: 0 0 0.4rem 0;
+  color: var(--text-primary);
+  letter-spacing: -0.015em;
 }
 
-.event-card-subheading {
-  font-size: 0.85rem;
-  color: #64748b;
+.upload-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.upload-actions {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.upload-footer {
+  margin-top: -0.25rem;
+}
+
+.format-note {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
   margin: 0;
 }
 
-.event-badges-group {
+/* Content Flow */
+.content-flow {
   display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Image Preview Card */
+.preview-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.preview-file-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.preview-chips {
+  display: flex;
+  align-items: center;
   gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.chip-size {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-input);
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-card);
+}
+
+.chip-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  background: rgba(0, 122, 255, 0.12);
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+}
+
+.chip-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.btn-pill-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--accent-danger);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.35rem 0.7rem;
+  border-radius: 20px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.btn-pill-danger:hover:not(:disabled) {
+  background: var(--accent-danger-bg);
+}
+
+.btn-pill-danger:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.image-stage {
+  width: 100%;
+  max-height: 320px;
+  background: #090d14;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-card);
+}
+
+.stage-img {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  display: block;
+}
+
+.scanner-action-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   align-items: center;
 }
 
-.event-form {
+.quick-switch-bar {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
-.form-group {
+.btn-subtle-link {
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+}
+
+.btn-subtle-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.quick-dot {
+  color: var(--text-tertiary);
+}
+
+/* Event Details Section */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-card-subtle);
+}
+
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.section-icon-bubble {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.section-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.section-heading {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.section-subheading {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0.15rem 0 0;
+  line-height: 1.3;
+}
+
+.confidence-pill-wrap {
+  flex-shrink: 0;
+}
+
+.badge-pill {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 20px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.badge-pill-confidence {
+  background: rgba(52, 199, 89, 0.15);
+  color: #15803d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge-pill-confidence {
+    background: rgba(48, 209, 88, 0.2);
+    color: #4ade80;
+  }
+}
+
+/* Grouped Form Fields */
+.grouped-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.field-item {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.form-row {
+.field-row {
   display: flex;
-  gap: 0.75rem;
   align-items: flex-end;
+  gap: 0.75rem;
 }
 
-.flex-1 {
+.flex-grow {
   flex: 1;
+  min-width: 0;
 }
 
-.form-label {
-  font-size: 0.85rem;
+.time-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.field-label {
+  font-size: 0.82rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
 }
 
-.form-input {
+.field-input,
+.field-textarea {
   width: 100%;
   box-sizing: border-box;
-  padding: 0.65rem 0.85rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-input);
+  padding: 0.75rem 0.9rem;
   font-size: 0.95rem;
-  color: #1e293b;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  transition: border-color 0.15s;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.form-input-lg {
+.field-input-bold {
   font-size: 1.05rem;
   font-weight: 600;
-  padding: 0.75rem 0.9rem;
 }
 
-.form-input:focus,
-.form-textarea:focus {
+.field-input-date,
+.field-input-time {
+  min-height: 44px;
+  color-scheme: light dark;
+}
+
+.field-input:focus,
+.field-textarea:focus {
   outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+  border-color: var(--border-input-focus);
+  background: var(--bg-input-focus);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
 }
 
-.input-with-icon {
+.field-textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.input-icon-shell {
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.input-icon {
+.input-inline-icon {
   position: absolute;
-  left: 0.75rem;
+  left: 0.85rem;
   width: 18px;
   height: 18px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
   pointer-events: none;
 }
 
-.icon-padded {
+.field-input-with-icon {
   padding-left: 2.35rem;
 }
 
-.checkbox-group {
+/* iOS-Style Toggle Switch */
+.field-item-toggle {
   justify-content: flex-end;
-  padding-bottom: 0.6rem;
+  padding-bottom: 0.35rem;
+  flex-shrink: 0;
 }
 
-.checkbox-label {
+.toggle-control {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #334155;
+  gap: 0.6rem;
   cursor: pointer;
   user-select: none;
 }
 
-.form-checkbox {
-  width: 18px;
-  height: 18px;
-  accent-color: #4f46e5;
+.toggle-label-text {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.switch-wrap {
+  position: relative;
+  width: 44px;
+  height: 26px;
+}
+
+.switch-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.switch-slider {
+  position: absolute;
   cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--border-input);
+  transition: 0.25s ease;
+  border-radius: 34px;
 }
 
-.form-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.9rem;
-  font-family: inherit;
-  color: #1e293b;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  resize: vertical;
-  line-height: 1.4;
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.event-action-bar {
+.switch-input:checked + .switch-slider {
+  background-color: var(--accent-primary);
+}
+
+.switch-input:checked + .switch-slider:before {
+  transform: translateX(18px);
+}
+
+/* Action Buttons Cluster */
+.event-actions-flow {
   display: flex;
+  flex-direction: column;
   gap: 0.75rem;
-  flex-wrap: wrap;
+  margin-top: 0.25rem;
 }
 
-/* Result Card */
-.result-card {
-  padding: 1.25rem;
+.secondary-button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
 
-.result-header {
+/* Button System */
+.btn-touch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-btn);
+  font-size: 0.96rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.btn-touch:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-touch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-touch-primary {
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: var(--shadow-primary-btn);
+}
+
+.btn-touch-primary:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+
+.btn-touch-secondary {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-input);
+}
+
+.btn-touch-secondary:hover:not(:disabled) {
+  background: var(--border-input);
+}
+
+.btn-touch-scan {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #0056b3 100%);
+  color: #ffffff;
+  box-shadow: var(--shadow-primary-btn);
+  font-size: 1rem;
+}
+
+.btn-touch-scan:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-primary-hover) 0%, #004696 100%);
+}
+
+.btn-touch-calendar {
+  background: linear-gradient(135deg, #34c759 0%, #248a3d 100%);
+  color: #ffffff;
+  box-shadow: var(--shadow-green-btn);
+  font-size: 1.02rem;
+  min-height: 52px;
+}
+
+.btn-touch-calendar:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2db84d 0%, #1e7534 100%);
+}
+
+.btn-touch-outline {
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  min-height: 44px;
+}
+
+.btn-touch-outline:hover:not(:disabled) {
+  background: var(--border-input);
+}
+
+.btn-touch-outline.is-copied {
+  background: rgba(52, 199, 89, 0.12);
+  border-color: rgba(52, 199, 89, 0.4);
+  color: #15803d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-touch-outline.is-copied {
+    color: #4ade80;
+  }
+}
+
+.btn-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.btn-icon-sm {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.btn-icon-xs {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Spinner */
+.spinner-circle {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  animation: spinCircle 0.8s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.spinner-light {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+}
+
+@keyframes spinCircle {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Collapsible OCR Diagnostics */
+.ocr-accordion {
+  padding: 0.9rem 1.1rem;
+  gap: 0.75rem;
+}
+
+.accordion-trigger {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  cursor: pointer;
+  color: var(--text-primary);
+  text-align: left;
 }
 
-.ocr-actions {
+.accordion-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.accordion-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+}
+
+.accordion-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.chip-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-input);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.accordion-chevron {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.accordion-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.accordion-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-card-subtle);
+}
+
+.ocr-toolbar {
   display: flex;
   gap: 0.5rem;
   align-items: center;
 }
 
-.result-title-group {
-  display: flex;
+.btn-subtle-tool {
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.result-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  margin: 0;
-  color: #1e293b;
-}
-
-.badges-group {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.badge {
-  font-size: 0.75rem;
+  gap: 0.35rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
   font-weight: 600;
-  padding: 0.2rem 0.5rem;
-  border-radius: 6px;
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  transition: all 0.15s ease;
 }
 
-.badge-primary {
-  background: #eff6ff;
-  color: #1d4ed8;
+.btn-subtle-tool:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-tertiary);
 }
 
-.badge-secondary {
-  background: #f1f5f9;
-  color: #475569;
+.btn-subtle-tool.is-copied {
+  background: rgba(52, 199, 89, 0.12);
+  border-color: rgba(52, 199, 89, 0.4);
+  color: #15803d;
 }
 
-.badge-accent {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.ocr-textarea {
+.ocr-raw-display {
   width: 100%;
   box-sizing: border-box;
-  padding: 0.85rem;
+  padding: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   line-height: 1.5;
-  color: #1e293b;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
   border-radius: 10px;
   resize: vertical;
 }
 
-.ocr-textarea:focus {
+.ocr-raw-display:focus {
   outline: none;
-  border-color: #007aff;
-  background: #ffffff;
+  border-color: var(--accent-primary);
 }
 
-/* Line breakdown */
-.line-breakdown-section {
-  margin-top: 1rem;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 0.75rem;
+.line-details-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.line-details-toggle {
+.btn-line-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  background: transparent;
+  gap: 0.35rem;
+  background: none;
   border: none;
-  color: #007aff;
-  font-size: 0.85rem;
+  color: var(--accent-primary);
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
-  padding: 0.3rem 0;
+  padding: 0.2rem 0;
+  width: fit-content;
 }
 
-.toggle-chevron {
-  width: 16px;
-  height: 16px;
+.chevron-sm {
   transition: transform 0.2s ease;
 }
 
-.toggle-chevron.rotated {
+.chevron-sm.is-rotated {
   transform: rotate(180deg);
 }
 
-.lines-container {
-  margin-top: 0.75rem;
-  max-height: 220px;
+.line-breakdown-list {
+  max-height: 200px;
   overflow-y: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border-input);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--bg-input);
 }
 
-.lines-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.line-row {
+.line-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.4rem 0.65rem;
-  border-bottom: 1px solid #f1f5f9;
-  font-size: 0.82rem;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border-card-subtle);
+  font-size: 0.8rem;
 }
 
-.line-row:last-child {
+.line-item:last-child {
   border-bottom: none;
 }
 
-.line-number {
-  color: #94a3b8;
+.line-idx {
+  color: var(--text-tertiary);
   font-family: monospace;
   font-size: 0.75rem;
-  min-width: 20px;
+  min-width: 18px;
 }
 
-.line-text {
+.line-content {
   flex: 1;
-  color: #334155;
+  color: var(--text-primary);
   word-break: break-word;
 }
 
-.line-confidence {
+.line-score {
   font-family: monospace;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.1rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.3rem;
   border-radius: 4px;
 }
 
-.conf-high {
-  background: #dcfce7;
+.score-high {
+  background: rgba(52, 199, 89, 0.15);
   color: #15803d;
 }
 
-.conf-med {
-  background: #fef9c3;
-  color: #854d0e;
+.score-med {
+  background: rgba(234, 179, 8, 0.15);
+  color: #a16207;
 }
 
-.conf-low {
-  background: #fee2e2;
+.score-low {
+  background: rgba(239, 68, 68, 0.15);
   color: #b91c1c;
 }
 
-/* Dark mode */
 @media (prefers-color-scheme: dark) {
-  .app-container {
-    color: #f3f4f6;
+  .score-high {
+    background: rgba(48, 209, 88, 0.2);
+    color: #4ade80;
   }
-
-  .app-title {
-    color: #f9fafb;
-  }
-
-  .app-tagline {
-    color: #9ca3af;
-  }
-
-  .card {
-    background: #1e293b;
-    border-color: #334155;
-    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
-  }
-
-  .event-card {
-    background: linear-gradient(180deg, #1e293b 0%, #1e1b4b 100%);
-    border-color: #4338ca;
-  }
-
-  .event-header {
-    border-bottom-color: #334155;
-  }
-
-  .event-icon-badge {
-    background: #312e81;
-    color: #a5b4fc;
-  }
-
-  .event-card-heading {
-    color: #f1f5f9;
-  }
-
-  .event-card-subheading {
-    color: #94a3b8;
-  }
-
-  .form-label {
-    color: #cbd5e1;
-  }
-
-  .form-input,
-  .form-textarea {
-    background: #0f172a;
-    border-color: #334155;
-    color: #f1f5f9;
-  }
-
-  .form-input:focus,
-  .form-textarea:focus {
-    border-color: #818cf8;
-    background: #0b1120;
-    box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.18);
-  }
-
-  .checkbox-label {
-    color: #e2e8f0;
-  }
-
-  .upload-zone {
-    background: #0f172a;
-    border-color: #334155;
-  }
-
-  .upload-zone.dragging {
-    background: #1e293b;
-    border-color: #38bdf8;
-  }
-
-  .upload-heading {
-    color: #f1f5f9;
-  }
-
-  .upload-subtext {
-    color: #94a3b8;
-  }
-
-  .upload-icon-circle {
-    background: #1e3a8a;
-    color: #60a5fa;
-  }
-
-  .btn-secondary {
-    background: #334155;
-    color: #f1f5f9;
-    border-color: #475569;
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: #475569;
-  }
-
-  .btn-text-action {
-    border-color: #475569;
-    color: #cbd5e1;
-  }
-
-  .btn-text-action:hover:not(:disabled) {
-    background: #334155;
-    color: #f1f5f9;
-  }
-
-  .btn-copy {
-    background: #334155;
-    border-color: #475569;
-    color: #f1f5f9;
-  }
-
-  .btn-copy:hover:not(:disabled) {
-    background: #475569;
-  }
-
-  .btn-copy.copied {
-    background: #064e3b;
-    border-color: #047857;
-    color: #6ee7b7;
-  }
-
-  .file-name {
-    color: #f1f5f9;
-  }
-
-  .file-size {
-    background: #334155;
-    color: #94a3b8;
-  }
-
-  .btn-text-danger:hover:not(:disabled) {
-    background: #450a0a;
-  }
-
-  .result-title {
-    color: #f1f5f9;
-  }
-
-  .badge-primary {
-    background: #1e3a8a;
-    color: #93c5fd;
-  }
-
-  .badge-secondary {
-    background: #334155;
-    color: #cbd5e1;
-  }
-
-  .badge-accent {
-    background: #064e3b;
-    color: #6ee7b7;
-  }
-
-  .ocr-textarea {
-    background: #0f172a;
-    border-color: #334155;
-    color: #f1f5f9;
-  }
-
-  .ocr-textarea:focus {
-    background: #0b1120;
-    border-color: #38bdf8;
-  }
-
-  .line-breakdown-section {
-    border-top-color: #334155;
-  }
-
-  .lines-container {
-    background: #0f172a;
-    border-color: #334155;
-  }
-
-  .line-row {
-    border-bottom-color: #1e293b;
-  }
-
-  .line-text {
-    color: #e2e8f0;
-  }
-
-  .conf-high {
-    background: #064e3b;
-    color: #6ee7b7;
-  }
-
-  .conf-med {
-    background: #713f12;
+  .score-med {
+    background: rgba(250, 204, 21, 0.2);
     color: #fde047;
   }
-
-  .conf-low {
-    background: #7f1d1d;
+  .score-low {
+    background: rgba(248, 113, 113, 0.2);
     color: #fca5a5;
   }
+}
 
-  .alert-success {
-    background: #064e3b;
-    border-color: #047857;
-    color: #a7f3d0;
+/* Small Screens Optimization (iPhone SE, 375px or narrower) */
+@media (max-width: 380px) {
+  .app-title {
+    font-size: 1.5rem;
   }
-
-  .alert-error {
-    background: #450a0a;
-    border-color: #7f1d1d;
-    color: #fca5a5;
+  .preview-file-name {
+    max-width: 140px;
   }
-
-  .alert-warning {
-    background: #451a03;
-    border-color: #78350f;
-    color: #fde68a;
+  .secondary-button-row {
+    grid-template-columns: 1fr;
   }
-
-  .btn-secondary-action {
-    background: #334155;
-    border-color: #475569;
-    color: #f1f5f9;
+  .field-row {
+    flex-direction: column;
+    align-items: stretch;
   }
-
-  .btn-secondary-action:hover:not(:disabled) {
-    background: #475569;
-    color: #ffffff;
-  }
-
-  .share-banner {
-    background: #1e3a8a;
-    border-color: #3b82f6;
-    color: #93c5fd;
-  }
-
-  .share-banner-icon {
-    color: #60a5fa;
-  }
-
-  .btn-banner-close {
-    color: #93c5fd;
-  }
-
-  .btn-banner-close:hover {
-    color: #ffffff;
-    background: #1d4ed8;
-  }
-
-  .badge-share {
-    background: #1e3a8a;
-    border-color: #3b82f6;
-    color: #93c5fd;
+  .field-item-toggle {
+    justify-content: space-between;
+    padding-top: 0.25rem;
   }
 }
 </style>
