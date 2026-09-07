@@ -3,8 +3,9 @@ fn main() {
     if target_os == "macos" || target_os == "ios" {
         cc::Build::new()
             .file("src/ocr_apple.m")
+            .file("src/share_apple.m")
             .flag("-fobjc-arc")
-            .compile("ocr_apple");
+            .compile("apple_native_bridge");
 
         println!("cargo:rustc-link-lib=framework=Vision");
         println!("cargo:rustc-link-lib=framework=CoreGraphics");

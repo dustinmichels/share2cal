@@ -150,9 +150,9 @@ mod tests {
         assert!(sample.exists(), "Sample file {:?} should exist", sample);
 
         let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed");
+        println!("--- Extracted OCR Text for gilman_flyer.png ---\n{}\n---------------------------------------------", result.text);
         assert!(!result.text.is_empty(), "Extracted text should not be empty");
         assert!(!result.lines.is_empty(), "Lines should not be empty");
-
         assert!(
             result.text.contains("GILMAN SQUARE"),
             "Expected text to contain 'GILMAN SQUARE', got:\n{}",

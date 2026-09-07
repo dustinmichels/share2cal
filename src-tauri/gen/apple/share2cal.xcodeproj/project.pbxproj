@@ -7,45 +7,87 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1B4A6F1CB540FF507A1928F6 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BAFD5A5D50C3AA0E3C42E8D9 /* Foundation.framework */; };
 		229AB5FDB95219058D7CF80C /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 960681BFC70BA689163A9755 /* ImageIO.framework */; };
 		443F8974D17889306D6C38E8 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 652488B8DC4412D06ABC6CD9 /* UIKit.framework */; };
+		507162ACB8D1458CE98A7925 /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DA93D6B6AEC7E84928AFB993 /* UniformTypeIdentifiers.framework */; };
 		577B6F048EF59E23F66110CD /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */; };
+		59ADEFDF81C305C3F7EAAF63 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 652488B8DC4412D06ABC6CD9 /* UIKit.framework */; };
+		5C9FC32D8F4FE62B8CBAF67B /* ShareViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 2C6B218A9E741A129C6D96C4 /* ShareViewController.m */; };
 		68FF2A1B46CEE987DFE667BC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D10A4FDB7ACD80E4768132D5 /* Assets.xcassets */; };
 		77CC95B5E1A02804BC5BC280 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5C084E09AFC7DD12869B016 /* Metal.framework */; };
 		86EF1C15CD5B0F7EF8C68D4D /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 2A67B1E323C7B807BD94E756 /* assets */; };
 		8C0303B51A71BDDE807FB216 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */; };
 		8C5B902B6835044F87FDCF15 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 082881A3D7B646A2BD564291 /* MetalKit.framework */; };
 		A10DCC53B04CEBF1EA7F9A58 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CAA90F234DCDF94D09B6E29 /* libapp.a */; };
+		A82C0D0D33C11C6FCF33F76A /* MobileCoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 38B72463E9EC38655F4155A1 /* MobileCoreServices.framework */; };
 		AD7D50C9664E7579FE5AE634 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 910AF1ADEBA2C2BEFD37A3BF /* libapp.a */; };
 		C486E0AF8DB292C9FBF82FF0 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = FAB3B6BCD997139849557DE5 /* main.mm */; };
+		C547A5F07F7A3ADD60E9566B /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6B904061138AA2279283C1B8 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D6BBFBA868BC3D424E19C9B0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */; };
 		EA4576A4CCA96A03C0DBB967 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3FE65E77EED40312746DB2B6 /* Security.framework */; };
 		EE95D4EC223CBF05FADB383B /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F020FAADEBE7A9FD5A2694E /* WebKit.framework */; };
 		F71D5CB46F6D7A74DC9F2F38 /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		BA8DF613ACE4BA579B0655DF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3E9733EBE8947374610A33B5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 02673756E0B467B683C9C7A8;
+			remoteInfo = ShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		78E4F41216FB874FDDFB86C2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C547A5F07F7A3ADD60E9566B /* ShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		082881A3D7B646A2BD564291 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		2A67B1E323C7B807BD94E756 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		2C6B218A9E741A129C6D96C4 /* ShareViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ShareViewController.m; sourceTree = "<group>"; };
+		34D1B02BC04C1526DC94D32C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		38B72463E9EC38655F4155A1 /* MobileCoreServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MobileCoreServices.framework; path = System/Library/Frameworks/MobileCoreServices.framework; sourceTree = SDKROOT; };
 		3FE65E77EED40312746DB2B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		471F0F46C3232A78F11EF9CC /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		4BB6744549204134D5B9AECD /* ocr_apple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ocr_apple.m; sourceTree = "<group>"; };
+		53D7926036FAFADC5F9BEFD1 /* share_apple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = share_apple.m; sourceTree = "<group>"; };
+		586AD022DA71FC64098FCE1F /* parser.rs */ = {isa = PBXFileReference; path = parser.rs; sourceTree = "<group>"; };
 		5E91CC88679B5609D052D692 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		5F020FAADEBE7A9FD5A2694E /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		62789070DE6AE14AF193AD52 /* ocr.rs */ = {isa = PBXFileReference; path = ocr.rs; sourceTree = "<group>"; };
 		652488B8DC4412D06ABC6CD9 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		6B40591F00A58983AC612467 /* share2cal_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = share2cal_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B904061138AA2279283C1B8 /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		71F20488F21B9299B2D5E6ED /* share.rs */ = {isa = PBXFileReference; path = share.rs; sourceTree = "<group>"; };
 		7CAA90F234DCDF94D09B6E29 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		7E36EB966F9CF7A12529280E /* share_apple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = share_apple.h; sourceTree = "<group>"; };
+		8C302B0F80BCC04DCFB32791 /* ShareViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ShareViewController.h; sourceTree = "<group>"; };
 		910AF1ADEBA2C2BEFD37A3BF /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		960681BFC70BA689163A9755 /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = System/Library/Frameworks/ImageIO.framework; sourceTree = SDKROOT; };
 		9DC1C616C55164C179573C40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BAFD5A5D50C3AA0E3C42E8D9 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
 		C1AD9170B737F2803812FE5C /* share2cal_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = share2cal_iOS.entitlements; sourceTree = "<group>"; };
 		C5C084E09AFC7DD12869B016 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		CDE1145D93D8DC49AACD85F9 /* ocr_apple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ocr_apple.h; sourceTree = "<group>"; };
 		D10A4FDB7ACD80E4768132D5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DA93D6B6AEC7E84928AFB993 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
+		DF2645DB9AD20966E78F2E38 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		F0298A197D26609C225A7EAA /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		FAB3B6BCD997139849557DE5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
@@ -69,20 +111,45 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BA2F0CD98EE2F3ECBB9FD81A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1B4A6F1CB540FF507A1928F6 /* Foundation.framework in Frameworks */,
+				59ADEFDF81C305C3F7EAAF63 /* UIKit.framework in Frameworks */,
+				507162ACB8D1458CE98A7925 /* UniformTypeIdentifiers.framework in Frameworks */,
+				A82C0D0D33C11C6FCF33F76A /* MobileCoreServices.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1C14B7FEA62E0784830B0F3A /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				34D1B02BC04C1526DC94D32C /* Info.plist */,
+				DF2645DB9AD20966E78F2E38 /* ShareExtension.entitlements */,
+				8C302B0F80BCC04DCFB32791 /* ShareViewController.h */,
+				2C6B218A9E741A129C6D96C4 /* ShareViewController.m */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
 		22B7BCC843AB922C10EB7F6A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */,
+				BAFD5A5D50C3AA0E3C42E8D9 /* Foundation.framework */,
 				960681BFC70BA689163A9755 /* ImageIO.framework */,
 				7CAA90F234DCDF94D09B6E29 /* libapp.a */,
 				C5C084E09AFC7DD12869B016 /* Metal.framework */,
 				082881A3D7B646A2BD564291 /* MetalKit.framework */,
+				38B72463E9EC38655F4155A1 /* MobileCoreServices.framework */,
 				94076C8BA78F5FD7B42BC295 /* QuartzCore.framework */,
 				3FE65E77EED40312746DB2B6 /* Security.framework */,
 				652488B8DC4412D06ABC6CD9 /* UIKit.framework */,
+				DA93D6B6AEC7E84928AFB993 /* UniformTypeIdentifiers.framework */,
 				BBEF7CBEDF8B5EBCE7F7E3CF /* Vision.framework */,
 				5F020FAADEBE7A9FD5A2694E /* WebKit.framework */,
 			);
@@ -105,6 +172,10 @@
 				CDE1145D93D8DC49AACD85F9 /* ocr_apple.h */,
 				4BB6744549204134D5B9AECD /* ocr_apple.m */,
 				62789070DE6AE14AF193AD52 /* ocr.rs */,
+				586AD022DA71FC64098FCE1F /* parser.rs */,
+				7E36EB966F9CF7A12529280E /* share_apple.h */,
+				53D7926036FAFADC5F9BEFD1 /* share_apple.m */,
+				71F20488F21B9299B2D5E6ED /* share.rs */,
 			);
 			name = src;
 			path = ../../src;
@@ -138,6 +209,7 @@
 			isa = PBXGroup;
 			children = (
 				6B40591F00A58983AC612467 /* share2cal_iOS.app */,
+				6B904061138AA2279283C1B8 /* ShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -159,6 +231,7 @@
 				F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */,
 				4E415844134DEF1A87F62DFF /* Externals */,
 				738B9DF300B2AB6ED997B278 /* share2cal_iOS */,
+				1C14B7FEA62E0784830B0F3A /* ShareExtension */,
 				531A5E0DA9136D7E8B7E316F /* Sources */,
 				2EEBF57450E26AF4447DC86B /* src */,
 				22B7BCC843AB922C10EB7F6A /* Frameworks */,
@@ -183,7 +256,7 @@
 			path = arm64;
 			sourceTree = "<group>";
 		};
-		"TEMP_CFE14524-F677-421E-B368-74E0FDFBB7F8" /* x86_64 */ = {
+		"TEMP_F3410F57-CF1E-44C7-BE1D-43BDF224142D" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -193,6 +266,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		02673756E0B467B683C9C7A8 /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9EFF198D0DFEAD54A6728923 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				D308F0C81F39DB4AE0A6F8AD /* Sources */,
+				BA2F0CD98EE2F3ECBB9FD81A /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			packageProductDependencies = (
+			);
+			productName = ShareExtension;
+			productReference = 6B904061138AA2279283C1B8 /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		2598BAB34C32DB29AA83F36D /* share2cal_iOS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 25452C2A811F99B39CA700AF /* Build configuration list for PBXNativeTarget "share2cal_iOS" */;
@@ -201,10 +292,12 @@
 				FAF0BC7F4A54389BD671277A /* Sources */,
 				233FB4E28004C4D1D09FFDFD /* Resources */,
 				4F1D02B01D03B9E3BD82DEDA /* Frameworks */,
+				78E4F41216FB874FDDFB86C2 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B2F0A63297FC93C17CE188B2 /* PBXTargetDependency */,
 			);
 			name = share2cal_iOS;
 			packageProductDependencies = (
@@ -222,6 +315,12 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					02673756E0B467B683C9C7A8 = {
+						DevelopmentTeam = LLM5F36KYW;
+					};
+					2598BAB34C32DB29AA83F36D = {
+						DevelopmentTeam = LLM5F36KYW;
+					};
 				};
 			};
 			buildConfigurationList = DB3840D6ACEA82E33A8F3825 /* Build configuration list for PBXProject "share2cal" */;
@@ -239,6 +338,7 @@
 			projectRoot = "";
 			targets = (
 				2598BAB34C32DB29AA83F36D /* share2cal_iOS */,
+				02673756E0B467B683C9C7A8 /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -277,11 +377,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
+			shellScript = "export PATH=\"$HOME/.local/share/mise/shims:$HOME/.local/share/mise/installs/node/latest/bin:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
 		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		D308F0C81F39DB4AE0A6F8AD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C9FC32D8F4FE62B8CBAF67B /* ShareViewController.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FAF0BC7F4A54389BD671277A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -291,6 +399,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B2F0A63297FC93C17CE188B2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 02673756E0B467B683C9C7A8 /* ShareExtension */;
+			targetProxy = BA8DF613ACE4BA579B0655DF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		307398E99D42964F1F3230A9 /* release */ = {
@@ -359,6 +475,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = share2cal_iOS/share2cal_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = LLM5F36KYW;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -390,6 +507,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = share2cal_iOS/share2cal_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = LLM5F36KYW;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -410,6 +528,29 @@
 				VALID_ARCHS = arm64;
 			};
 			name = release;
+		};
+		6E28D3AB939BAAAA1872C971 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					arm64,
+				);
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = LLM5F36KYW;
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal.ShareExtension;
+				PRODUCT_NAME = ShareExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
 		};
 		9E7DCE986BC4484671BD8BBE /* debug */ = {
 			isa = XCBuildConfiguration;
@@ -474,6 +615,29 @@
 			};
 			name = debug;
 		};
+		D55FDCE7A1437EB863EECAF4 /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					arm64,
+				);
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = LLM5F36KYW;
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal.ShareExtension;
+				PRODUCT_NAME = ShareExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -482,6 +646,15 @@
 			buildConfigurations = (
 				5AE6050DD7AAB8C4F0A098C2 /* debug */,
 				5E455F9BDDB7FA892247F7A7 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		9EFF198D0DFEAD54A6728923 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6E28D3AB939BAAAA1872C971 /* debug */,
+				D55FDCE7A1437EB863EECAF4 /* release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;

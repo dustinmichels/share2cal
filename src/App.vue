@@ -1,18 +1,66 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { extractTextFromBytes, type OcrResult } from "./services/ocr";
-
+import {
+  parseEventFromText,
+  downloadIcsFile,
+  extractDateInput,
+  extractTimeInput,
+  buildIsoFromDateTime,
+  type EventDetails,
+} from "./services/event";
+import {
+  getPendingSharedImage,
+  clearPendingSharedImage,
+  payloadToFile,
+} from "./services/share";
 const selectedFile = ref<File | null>(null);
 const previewUrl = ref<string | null>(null);
 const isDragging = ref(false);
 const isProcessing = ref(false);
 const errorMessage = ref<string | null>(null);
 const ocrResult = ref<OcrResult | null>(null);
-const copied = ref(false);
+const eventDetails = ref<EventDetails | null>(null);
+
+const shareNotification = ref<string | null>(null);
+const isFromShareExtension = ref(false);
+const copiedOcr = ref(false);
+const copiedSummary = ref(false);
+const calendarDownloaded = ref(false);
+const showOcrSection = ref(false);
 const showLineDetails = ref(false);
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const cameraInputRef = ref<HTMLInputElement | null>(null);
+
+// Editable event form model
+const eventForm = ref({
+  title: "",
+  date: "",
+  startTime: "",
+  endTime: "",
+  isAllDay: false,
+  location: "",
+  description: "",
+});
+
+function syncFormFromEvent(event: EventDetails) {
+  eventForm.value = {
+    title: event.title || "",
+    date: extractDateInput(event.start_time),
+    startTime: extractTimeInput(event.start_time, "12:00"),
+    endTime: extractTimeInput(event.end_time, "13:00"),
+    isAllDay: event.is_all_day,
+    location: event.location || "",
+    description: event.description || "",
+  };
+}
+
+watch(eventDetails, (newVal) => {
+  if (newVal) {
+    syncFormFromEvent(newVal);
+  }
+});
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -31,6 +79,11 @@ const averageConfidence = computed(() => {
   return Math.round((total / ocrResult.value.lines.length) * 100);
 });
 
+const eventConfidencePercent = computed(() => {
+  if (!eventDetails.value) return 0;
+  return Math.round(eventDetails.value.confidence * 100);
+});
+
 function setImageFile(file: File) {
   if (!file.type.startsWith("image/") && !file.name.match(/\.(heic|heif|png|jpe?g|webp|bmp|gif)$/i)) {
     errorMessage.value = "Please select a valid image file (PNG, JPEG, HEIF, WebP, etc.).";
@@ -45,6 +98,8 @@ function setImageFile(file: File) {
   previewUrl.value = URL.createObjectURL(file);
   errorMessage.value = null;
   ocrResult.value = null;
+  eventDetails.value = null;
+  calendarDownloaded.value = false;
 }
 
 function handleFileInput(event: Event) {
@@ -110,19 +165,86 @@ async function handleGo() {
 
   errorMessage.value = null;
   isProcessing.value = true;
+  calendarDownloaded.value = false;
 
   try {
     const arrayBuffer = await selectedFile.value.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     const res = await extractTextFromBytes(bytes);
     ocrResult.value = res;
+
     if (!res.text.trim()) {
       errorMessage.value = "No text was detected in this image. Try another photo with clearer text.";
+      eventDetails.value = null;
+    } else {
+      // Parse event details from the extracted OCR text
+      const parsed = await parseEventFromText(res.text);
+      eventDetails.value = parsed;
     }
   } catch (err: any) {
-    errorMessage.value = err?.toString() || "Failed to process OCR on the selected image.";
+    errorMessage.value = err?.toString() || "Failed to process OCR and event extraction on the selected image.";
   } finally {
     isProcessing.value = false;
+  }
+}
+
+async function handleReparse() {
+  if (!ocrResult.value?.text) return;
+  try {
+    const parsed = await parseEventFromText(ocrResult.value.text);
+    eventDetails.value = parsed;
+  } catch (err: any) {
+    errorMessage.value = err?.toString() || "Failed to re-parse event details.";
+  }
+}
+
+function getComposedEvent(): EventDetails {
+  const startIso = eventForm.value.isAllDay
+    ? `${eventForm.value.date}T00:00:00Z`
+    : buildIsoFromDateTime(eventForm.value.date, eventForm.value.startTime);
+
+  const endIso = eventForm.value.isAllDay
+    ? `${eventForm.value.date}T23:59:59Z`
+    : buildIsoFromDateTime(eventForm.value.date, eventForm.value.endTime);
+
+  return {
+    title: eventForm.value.title.trim() || "New Event",
+    start_time: startIso || null,
+    end_time: endIso || null,
+    is_all_day: eventForm.value.isAllDay,
+    location: eventForm.value.location.trim() || null,
+    description: eventForm.value.description.trim() || null,
+    confidence: eventDetails.value?.confidence ?? 0.8,
+    source: eventDetails.value?.source ?? "deterministic",
+  };
+}
+
+function handleAddToCalendar() {
+  const event = getComposedEvent();
+  downloadIcsFile(event);
+  calendarDownloaded.value = true;
+  setTimeout(() => {
+    calendarDownloaded.value = false;
+  }, 4000);
+}
+
+async function copySummary() {
+  const event = getComposedEvent();
+  const lines = [
+    `📅 ${event.title}`,
+    event.is_all_day ? `Date: ${eventForm.value.date} (All day)` : `Date & Time: ${eventForm.value.date} (${eventForm.value.startTime} - ${eventForm.value.endTime})`,
+  ];
+  if (event.location) lines.push(`📍 Location: ${event.location}`);
+  if (event.description) lines.push(`📝 Notes: ${event.description}`);
+
+  try {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    copiedSummary.value = true;
+    setTimeout(() => {
+      copiedSummary.value = false;
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy summary:", err);
   }
 }
 
@@ -133,29 +255,63 @@ function handleReset() {
   selectedFile.value = null;
   previewUrl.value = null;
   ocrResult.value = null;
+  eventDetails.value = null;
   errorMessage.value = null;
   showLineDetails.value = false;
+  showOcrSection.value = false;
+  calendarDownloaded.value = false;
+  isFromShareExtension.value = false;
+  shareNotification.value = null;
 }
 
-async function copyToClipboard() {
+async function copyOcrToClipboard() {
   if (!ocrResult.value?.text) return;
   try {
     await navigator.clipboard.writeText(ocrResult.value.text);
-    copied.value = true;
+    copiedOcr.value = true;
     setTimeout(() => {
-      copied.value = false;
+      copiedOcr.value = false;
     }, 2000);
   } catch (err) {
-    console.error("Failed to copy text:", err);
+    console.error("Failed to copy OCR text:", err);
+  }
+}
+async function checkPendingShare() {
+  try {
+    const pending = await getPendingSharedImage(true);
+    if (pending && pending.bytes && pending.bytes.length > 0) {
+      const file = payloadToFile(pending);
+      if (file) {
+        isFromShareExtension.value = true;
+        shareNotification.value = `Received flyer from iOS Share Sheet: ${pending.file_name}`;
+        setImageFile(file);
+        await clearPendingSharedImage();
+        // Automatically process OCR and event extraction for smooth mobile experience
+        await handleGo();
+      }
+    }
+  } catch (err) {
+    console.warn("Could not check pending shared image:", err);
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    checkPendingShare();
   }
 }
 
 onMounted(() => {
   window.addEventListener("paste", handlePaste);
+  window.addEventListener("focus", checkPendingShare);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  checkPendingShare();
 });
 
 onUnmounted(() => {
   window.removeEventListener("paste", handlePaste);
+  window.removeEventListener("focus", checkPendingShare);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value);
   }
@@ -180,8 +336,21 @@ onUnmounted(() => {
         </svg>
       </div>
       <h1 class="app-title">Share2Cal</h1>
-      <p class="app-tagline">Upload an image or take a photo to extract text and details</p>
+      <p class="app-tagline">Turn flyers, screenshots, and invitations into calendar events in seconds</p>
     </header>
+
+    <!-- Share Notification Banner -->
+    <div v-if="shareNotification" class="share-banner">
+      <div class="share-banner-content">
+        <svg class="share-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+          <polyline points="16 6 12 2 8 6"></polyline>
+          <line x1="12" y1="2" x2="12" y2="15"></line>
+        </svg>
+        <span>{{ shareNotification }}</span>
+      </div>
+      <button type="button" class="btn-banner-close" @click="shareNotification = null" aria-label="Close notification">✕</button>
+    </div>
 
     <!-- Hidden file inputs -->
     <input
@@ -250,7 +419,17 @@ onUnmounted(() => {
       <div class="card preview-card">
         <div class="preview-header">
           <div class="file-meta">
-            <span class="file-name" :title="selectedFile.name">{{ selectedFile.name }}</span>
+            <div class="file-meta-top">
+              <span class="file-name" :title="selectedFile.name">{{ selectedFile.name }}</span>
+              <span v-if="isFromShareExtension" class="badge badge-share">
+                <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                  <polyline points="16 6 12 2 8 6"></polyline>
+                  <line x1="12" y1="2" x2="12" y2="15"></line>
+                </svg>
+                iOS Share
+              </span>
+            </div>
             <span class="file-size">{{ formatFileSize(selectedFile.size) }}</span>
           </div>
           <button type="button" class="btn-text-danger" :disabled="isProcessing" @click="handleReset">
@@ -278,11 +457,11 @@ onUnmounted(() => {
               <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="5 3 19 12 5 21 5 3"></polygon>
               </svg>
-              <span>Go</span>
+              <span>{{ eventDetails ? 'Re-scan & Extract' : 'Scan & Extract Event' }}</span>
             </template>
             <template v-else>
               <div class="spinner"></div>
-              <span>Processing OCR...</span>
+              <span>Scanning OCR & Extracting Event...</span>
             </template>
           </button>
 
@@ -295,6 +474,18 @@ onUnmounted(() => {
               Take new photo
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Success / Download Notification Toast -->
+      <div v-if="calendarDownloaded" class="alert-box alert-success">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <div class="alert-content">
+          <span class="alert-title">Calendar File (.ics) Exported!</span>
+          <p class="alert-message">Your calendar event file was downloaded. Open it to add directly to Apple Calendar, Google Calendar, or Outlook.</p>
         </div>
       </div>
 
@@ -311,26 +502,146 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- OCR Results -->
-      <div v-if="ocrResult" class="card result-card">
-        <div class="result-header">
-          <div class="result-title-group">
-            <h2 class="result-title">OCR Result</h2>
-            <div class="badges-group">
-              <span class="badge badge-primary">{{ ocrResult.lines.length }} lines</span>
-              <span class="badge badge-secondary">{{ wordCount }} words</span>
-              <span v-if="averageConfidence > 0" class="badge badge-accent">{{ averageConfidence }}% conf</span>
+      <!-- Event Review & Edit Card -->
+      <div v-if="eventDetails" class="card event-card">
+        <div class="event-header">
+          <div class="event-title-group">
+            <div class="event-icon-badge">
+              <svg class="event-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+            </div>
+            <div>
+              <h2 class="event-card-heading">Event Details</h2>
+              <p class="event-card-subheading">Review and edit before adding to your calendar</p>
             </div>
           </div>
+
+          <div class="event-badges-group">
+            <span class="badge badge-accent">{{ eventConfidencePercent }}% confidence</span>
+            <span class="badge badge-secondary">{{ eventDetails.source === 'deterministic' ? 'Heuristic Parser' : 'LLM' }}</span>
+          </div>
+        </div>
+
+        <!-- Form fields -->
+        <div class="event-form">
+          <!-- Title -->
+          <div class="form-group">
+            <label class="form-label" for="event-title">Event Title</label>
+            <input
+              id="event-title"
+              v-model="eventForm.title"
+              type="text"
+              class="form-input form-input-lg"
+              placeholder="Event name"
+            />
+          </div>
+
+          <!-- Date & All-day row -->
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label" for="event-date">Date</label>
+              <input
+                id="event-date"
+                v-model="eventForm.date"
+                type="date"
+                class="form-input"
+              />
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label class="checkbox-label" for="event-allday">
+                <input
+                  id="event-allday"
+                  v-model="eventForm.isAllDay"
+                  type="checkbox"
+                  class="form-checkbox"
+                />
+                <span>All-day</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Time row (when not all-day) -->
+          <div v-if="!eventForm.isAllDay" class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label" for="event-start">Start Time</label>
+              <input
+                id="event-start"
+                v-model="eventForm.startTime"
+                type="time"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="event-end">End Time</label>
+              <input
+                id="event-end"
+                v-model="eventForm.endTime"
+                type="time"
+                class="form-input"
+              />
+            </div>
+          </div>
+
+          <!-- Location -->
+          <div class="form-group">
+            <label class="form-label" for="event-location">Location / Venue</label>
+            <div class="input-with-icon">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+              <input
+                id="event-location"
+                v-model="eventForm.location"
+                type="text"
+                class="form-input icon-padded"
+                placeholder="Venue name, address, or Zoom link"
+              />
+            </div>
+          </div>
+
+          <!-- Description / Notes -->
+          <div class="form-group">
+            <label class="form-label" for="event-description">Description & Notes</label>
+            <textarea
+              id="event-description"
+              v-model="eventForm.description"
+              class="form-textarea"
+              rows="3"
+              placeholder="Performers, food, activities, notes..."
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- Event Action Bar -->
+        <div class="event-action-bar">
+          <button
+            type="button"
+            class="btn btn-add-calendar"
+            @click="handleAddToCalendar"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="12" y1="11" x2="12" y2="17"></line>
+              <line x1="9" y1="14" x2="15" y2="14"></line>
+            </svg>
+            <span>Add to Calendar (.ics)</span>
+          </button>
 
           <button
             type="button"
             class="btn btn-copy"
-            :class="{ 'copied': copied }"
-            :disabled="!ocrResult.text.trim()"
-            @click="copyToClipboard"
+            :class="{ 'copied': copiedSummary }"
+            @click="copySummary"
           >
-            <template v-if="copied">
+            <template v-if="copiedSummary">
               <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12"></polyline>
               </svg>
@@ -341,9 +652,59 @@ onUnmounted(() => {
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
-              <span>Copy Text</span>
+              <span>Copy Summary</span>
             </template>
           </button>
+        </div>
+      </div>
+
+      <!-- Collapsible OCR Result Card -->
+      <div v-if="ocrResult" class="card result-card">
+        <div class="result-header">
+          <div class="result-title-group">
+            <h3 class="result-title">Raw OCR Detection</h3>
+            <div class="badges-group">
+              <span class="badge badge-primary">{{ ocrResult.lines.length }} lines</span>
+              <span class="badge badge-secondary">{{ wordCount }} words</span>
+              <span v-if="averageConfidence > 0" class="badge badge-accent">{{ averageConfidence }}% conf</span>
+            </div>
+          </div>
+
+          <div class="ocr-actions">
+            <button
+              type="button"
+              class="btn-text-action"
+              @click="handleReparse"
+            >
+              <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              <span>Re-parse</span>
+            </button>
+
+            <button
+              type="button"
+              class="btn btn-copy"
+              :class="{ 'copied': copiedOcr }"
+              :disabled="!ocrResult.text.trim()"
+              @click="copyOcrToClipboard"
+            >
+              <template v-if="copiedOcr">
+                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Copied!</span>
+              </template>
+              <template v-else>
+                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy OCR</span>
+              </template>
+            </button>
+          </div>
         </div>
 
         <div class="result-body">
@@ -351,7 +712,7 @@ onUnmounted(() => {
             readonly
             class="ocr-textarea"
             :value="ocrResult.text"
-            rows="10"
+            rows="6"
             placeholder="No text detected."
           ></textarea>
         </div>
@@ -448,6 +809,7 @@ onUnmounted(() => {
   font-size: 0.95rem;
   color: #6b7280;
   margin: 0;
+  line-height: 1.4;
 }
 
 /* Hidden inputs */
@@ -579,18 +941,33 @@ onUnmounted(() => {
 .btn-go {
   width: 100%;
   padding: 0.9rem 1.5rem;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
   background: linear-gradient(135deg, #007aff 0%, #0056b3 100%);
   color: white;
   border-radius: 12px;
   box-shadow: 0 4px 14px rgba(0, 122, 255, 0.35);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .btn-go:hover:not(:disabled) {
   background: linear-gradient(135deg, #006ee6 0%, #004c9e 100%);
   box-shadow: 0 6px 18px rgba(0, 122, 255, 0.4);
+}
+
+.btn-add-calendar {
+  flex: 1;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  padding: 0.8rem 1.25rem;
+  font-weight: 700;
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3);
+}
+
+.btn-add-calendar:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
 }
 
 .btn-icon {
@@ -619,6 +996,25 @@ onUnmounted(() => {
 
 .btn-text-danger:hover:not(:disabled) {
   background: #fee2e2;
+}
+
+.btn-text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+}
+
+.btn-text-action:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #1e293b;
 }
 
 .btn-link {
@@ -667,6 +1063,62 @@ onUnmounted(() => {
   padding: 1.25rem;
 }
 
+.share-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  color: #1d4ed8;
+  font-size: 0.88rem;
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.08);
+  animation: slideIn 0.25s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.share-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.share-banner-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #2563eb;
+}
+
+.btn-banner-close {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: #60a5fa;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.btn-banner-close:hover {
+  color: #1e40af;
+  background: #dbeafe;
+}
+
 .preview-header {
   display: flex;
   justify-content: space-between;
@@ -676,9 +1128,16 @@ onUnmounted(() => {
 
 .file-meta {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow: hidden;
+}
+
+.file-meta-top {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
-  overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .file-name {
@@ -688,7 +1147,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 260px;
+  max-width: 240px;
 }
 
 .file-size {
@@ -697,6 +1156,25 @@ onUnmounted(() => {
   background: #f1f5f9;
   padding: 0.15rem 0.45rem;
   border-radius: 4px;
+  align-self: flex-start;
+}
+
+.badge-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #2563eb;
+  background: #dbeafe;
+  border: 1px solid #bfdbfe;
+  padding: 0.15rem 0.45rem;
+  border-radius: 12px;
+}
+
+.badge-icon {
+  width: 12px;
+  height: 12px;
 }
 
 .preview-container {
@@ -762,6 +1240,12 @@ onUnmounted(() => {
   margin-bottom: 1.25rem;
 }
 
+.alert-success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
 .alert-error {
   background: #fef2f2;
   border: 1px solid #fecaca;
@@ -792,6 +1276,181 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
+/* Event Card */
+.event-card {
+  padding: 1.5rem;
+  border: 2px solid #e0e7ff;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbff 100%);
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.event-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.event-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  background: #e0e7ff;
+  color: #4f46e5;
+  border-radius: 10px;
+}
+
+.event-header-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.event-card-heading {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.2rem 0;
+  color: #1e293b;
+}
+
+.event-card-subheading {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin: 0;
+}
+
+.event-badges-group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.event-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.form-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.95rem;
+  color: #1e293b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+
+.form-input-lg {
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.75rem 0.9rem;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 0.75rem;
+  width: 18px;
+  height: 18px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.icon-padded {
+  padding-left: 2.35rem;
+}
+
+.checkbox-group {
+  justify-content: flex-end;
+  padding-bottom: 0.6rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #4f46e5;
+  cursor: pointer;
+}
+
+.form-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: #1e293b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.event-action-bar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 /* Result Card */
 .result-card {
   padding: 1.25rem;
@@ -806,6 +1465,12 @@ onUnmounted(() => {
   margin-bottom: 1rem;
 }
 
+.ocr-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .result-title-group {
   display: flex;
   align-items: center;
@@ -814,7 +1479,7 @@ onUnmounted(() => {
 }
 
 .result-title {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: 700;
   margin: 0;
   color: #1e293b;
@@ -852,7 +1517,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   padding: 0.85rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   line-height: 1.5;
   color: #1e293b;
   background: #f8fafc;
@@ -981,6 +1646,50 @@ onUnmounted(() => {
     box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
   }
 
+  .event-card {
+    background: linear-gradient(180deg, #1e293b 0%, #1e1b4b 100%);
+    border-color: #4338ca;
+  }
+
+  .event-header {
+    border-bottom-color: #334155;
+  }
+
+  .event-icon-badge {
+    background: #312e81;
+    color: #a5b4fc;
+  }
+
+  .event-card-heading {
+    color: #f1f5f9;
+  }
+
+  .event-card-subheading {
+    color: #94a3b8;
+  }
+
+  .form-label {
+    color: #cbd5e1;
+  }
+
+  .form-input,
+  .form-textarea {
+    background: #0f172a;
+    border-color: #334155;
+    color: #f1f5f9;
+  }
+
+  .form-input:focus,
+  .form-textarea:focus {
+    border-color: #818cf8;
+    background: #0b1120;
+    box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.18);
+  }
+
+  .checkbox-label {
+    color: #e2e8f0;
+  }
+
   .upload-zone {
     background: #0f172a;
     border-color: #334155;
@@ -1012,6 +1721,16 @@ onUnmounted(() => {
 
   .btn-secondary:hover:not(:disabled) {
     background: #475569;
+  }
+
+  .btn-text-action {
+    border-color: #475569;
+    color: #cbd5e1;
+  }
+
+  .btn-text-action:hover:not(:disabled) {
+    background: #334155;
+    color: #f1f5f9;
   }
 
   .btn-copy {
@@ -1105,10 +1824,41 @@ onUnmounted(() => {
     color: #fca5a5;
   }
 
+  .alert-success {
+    background: #064e3b;
+    border-color: #047857;
+    color: #a7f3d0;
+  }
+
   .alert-error {
     background: #450a0a;
     border-color: #7f1d1d;
     color: #fca5a5;
+  }
+
+  .share-banner {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #93c5fd;
+  }
+
+  .share-banner-icon {
+    color: #60a5fa;
+  }
+
+  .btn-banner-close {
+    color: #93c5fd;
+  }
+
+  .btn-banner-close:hover {
+    color: #ffffff;
+    background: #1d4ed8;
+  }
+
+  .badge-share {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #93c5fd;
   }
 }
 </style>

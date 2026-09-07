@@ -1,0 +1,947 @@
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime,
+    Offset, TimeZone,
+};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventDetails {
+    pub title: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
+    pub location: Option<String>,
+    pub description: Option<String>,
+    pub confidence: f32,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReferenceContext {
+    pub reference_time: Option<String>,
+    pub timezone_offset_minutes: Option<i32>,
+}
+
+impl ReferenceContext {
+    pub fn now() -> Self {
+        let now = Local::now();
+        Self {
+            reference_time: Some(now.to_rfc3339()),
+            timezone_offset_minutes: Some(now.offset().local_minus_utc() / 60),
+        }
+    }
+
+    pub fn get_reference_datetime(&self) -> DateTime<FixedOffset> {
+        if let Some(ref_str) = &self.reference_time {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(ref_str) {
+                return dt;
+            }
+            if let Ok(dt) = DateTime::parse_from_str(ref_str, "%Y-%m-%dT%H:%M:%S%z") {
+                return dt;
+            }
+            if let Ok(naive) = NaiveDateTime::parse_from_str(ref_str, "%Y-%m-%dT%H:%M:%S") {
+                let offset_sec = self.timezone_offset_minutes.unwrap_or(0) * 60;
+                let offset = FixedOffset::east_opt(offset_sec).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                return offset.from_utc_datetime(&naive);
+            }
+        }
+
+        let now_local = Local::now();
+        let offset = now_local.offset().fix();
+        now_local.with_timezone(&offset)
+    }
+
+    pub fn get_fixed_offset(&self) -> FixedOffset {
+        if let Some(mins) = self.timezone_offset_minutes {
+            FixedOffset::east_opt(mins * 60).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap())
+        } else {
+            self.get_reference_datetime().offset().clone()
+        }
+    }
+}
+
+/// Generates a strict GBNF grammar for llama.cpp structured event extraction
+pub fn get_gbnf_grammar() -> &'static str {
+    r#"root ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws opt_string "," ws "\"end_time\":" ws opt_string "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws opt_string "," ws "\"description\":" ws opt_string "}"
+string ::= "\"" [^"\\]* "\""
+opt_string ::= "null" | string
+boolean ::= "true" | "false"
+ws ::= [ \t\n]*
+"#
+}
+
+/// Generates the JSON schema for LLM structured outputs
+pub fn get_json_schema() -> serde_json::Value {
+    serde_json::json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "EventDetails",
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "The concise, clear title or name of the event."
+            },
+            "start_time": {
+                "type": ["string", "null"],
+                "description": "ISO-8601 formatted start date-time including timezone offset (e.g. 2026-09-12T12:00:00-04:00) or YYYY-MM-DD for all-day events."
+            },
+            "end_time": {
+                "type": ["string", "null"],
+                "description": "ISO-8601 formatted end date-time including timezone offset (e.g. 2026-09-12T17:00:00-04:00) or YYYY-MM-DD for all-day events."
+            },
+            "is_all_day": {
+                "type": "boolean",
+                "description": "True if the event spans the entire day or no specific time is mentioned."
+            },
+            "location": {
+                "type": ["string", "null"],
+                "description": "The venue name, physical address, or virtual link (Zoom/Meet)."
+            },
+            "description": {
+                "type": ["string", "null"],
+                "description": "Summary of activities, performers, notes, schedule, or extra details."
+            }
+        },
+        "required": ["title", "start_time", "end_time", "is_all_day", "location", "description"],
+        "additionalProperties": false
+    })
+}
+
+/// Formats the prompt with dynamic reference context injection
+pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) -> String {
+    let ref_dt = context.get_reference_datetime();
+    let ref_str = ref_dt.to_rfc3339();
+    let day_name = match ref_dt.weekday() {
+        chrono::Weekday::Mon => "Monday",
+        chrono::Weekday::Tue => "Tuesday",
+        chrono::Weekday::Wed => "Wednesday",
+        chrono::Weekday::Thu => "Thursday",
+        chrono::Weekday::Fri => "Friday",
+        chrono::Weekday::Sat => "Saturday",
+        chrono::Weekday::Sun => "Sunday",
+    };
+
+    format!(
+        "Current Reference Time: {} ({})\n\n\
+        Task: Extract the event from the text below into ISO-8601 timestamps relative to the reference time. Output valid JSON matching the EventDetails schema.\n\n\
+        --- Extracted Text ---\n\
+        {}\n\
+        ----------------------\n",
+        ref_str, day_name, ocr_text.trim()
+    )
+}
+
+/// Deterministic fallback parser implementing heuristic & regex extraction
+pub fn parse_event_deterministic(ocr_text: &str, context: &ReferenceContext) -> EventDetails {
+    let ref_dt = context.get_reference_datetime();
+    let offset = context.get_fixed_offset();
+
+    let lines: Vec<&str> = ocr_text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    // 1. Date Extraction
+    let extracted_date = extract_date(ocr_text, ref_dt);
+
+    // 2. Time Extraction
+    let extracted_times = extract_times(ocr_text);
+
+    // Combine date & time into ISO-8601 timestamps
+    let (start_time_iso, end_time_iso, is_all_day) = match (extracted_date, extracted_times) {
+        (Some(date), Some((start_time, end_time_opt))) => {
+            let start_dt = offset.from_local_datetime(&date.and_time(start_time)).unwrap();
+
+            let end_dt_str = if let Some(end_time) = end_time_opt {
+                let end_date = if end_time < start_time {
+                    date + Duration::days(1)
+                } else {
+                    date
+                };
+                let end_dt = offset.from_local_datetime(&end_date.and_time(end_time)).unwrap();
+                Some(end_dt.to_rfc3339())
+            } else {
+                let end_dt = start_dt + Duration::hours(1);
+                Some(end_dt.to_rfc3339())
+            };
+
+            (Some(start_dt.to_rfc3339()), end_dt_str, false)
+        }
+        (Some(date), None) => {
+            // All-day event on this date
+            let date_str = date.format("%Y-%m-%d").to_string();
+            (Some(date_str.clone()), Some(date_str), true)
+        }
+        (None, Some((start_time, end_time_opt))) => {
+            // Time found but no date -> assume reference date (or tomorrow if time already passed today)
+            let mut target_date = ref_dt.date_naive();
+            if start_time < ref_dt.time() {
+                target_date = target_date + Duration::days(1);
+            }
+            let start_dt = offset.from_local_datetime(&target_date.and_time(start_time)).unwrap();
+            let end_dt_str = if let Some(end_time) = end_time_opt {
+                let end_date = if end_time < start_time {
+                    target_date + Duration::days(1)
+                } else {
+                    target_date
+                };
+                let end_dt = offset.from_local_datetime(&end_date.and_time(end_time)).unwrap();
+                Some(end_dt.to_rfc3339())
+            } else {
+                let end_dt = start_dt + Duration::hours(1);
+                Some(end_dt.to_rfc3339())
+            };
+            (Some(start_dt.to_rfc3339()), end_dt_str, false)
+        }
+        (None, None) => (None, None, false),
+    };
+
+    // 3. Location Extraction
+    let location = extract_location(&lines, ocr_text);
+
+    // 4. Title Extraction
+    let title = extract_title(&lines, ocr_text);
+
+    // 5. Description Extraction
+    let description = extract_description(&lines, &title, location.as_deref());
+
+    // 6. Confidence calculation
+    let mut confidence_score: f32 = 0.3;
+    if !title.is_empty() && title != "Event" && title != "Untitled Event" {
+        confidence_score += 0.25;
+    }
+    if start_time_iso.is_some() {
+        confidence_score += 0.25;
+    }
+    if location.is_some() {
+        confidence_score += 0.15;
+    }
+    if description.is_some() {
+        confidence_score += 0.05;
+    }
+    let confidence = confidence_score.min(0.95);
+
+    EventDetails {
+        title,
+        start_time: start_time_iso,
+        end_time: end_time_iso,
+        is_all_day,
+        location,
+        description,
+        confidence,
+        source: "deterministic".to_string(),
+    }
+}
+
+fn month_to_num(m: &str) -> Option<u32> {
+    let lower = m.to_lowercase();
+    match lower.as_str() {
+        "jan" | "january" | "jan." => Some(1),
+        "feb" | "february" | "feb." => Some(2),
+        "mar" | "march" | "mar." => Some(3),
+        "apr" | "april" | "apr." => Some(4),
+        "may" => Some(5),
+        "jun" | "june" | "jun." => Some(6),
+        "jul" | "july" | "jul." => Some(7),
+        "aug" | "august" | "aug." => Some(8),
+        "sep" | "sept" | "september" | "sep." | "sept." => Some(9),
+        "oct" | "october" | "oct." => Some(10),
+        "nov" | "november" | "nov." => Some(11),
+        "dec" | "december" | "dec." => Some(12),
+        _ => None,
+    }
+}
+
+fn weekday_to_num(w: &str) -> Option<chrono::Weekday> {
+    let lower = w.to_lowercase();
+    match lower.as_str() {
+        "mon" | "monday" | "mon." => Some(chrono::Weekday::Mon),
+        "tue" | "tues" | "tuesday" | "tue." | "tues." => Some(chrono::Weekday::Tue),
+        "wed" | "wednesday" | "wed." => Some(chrono::Weekday::Wed),
+        "thu" | "thur" | "thurs" | "thursday" | "thu." | "thurs." => Some(chrono::Weekday::Thu),
+        "fri" | "friday" | "fri." => Some(chrono::Weekday::Fri),
+        "sat" | "saturday" | "sat." => Some(chrono::Weekday::Sat),
+        "sun" | "sunday" | "sun." => Some(chrono::Weekday::Sun),
+        _ => None,
+    }
+}
+
+fn resolve_year(month: u32, day: u32, weekday_opt: Option<chrono::Weekday>, ref_dt: DateTime<FixedOffset>) -> i32 {
+    let ref_year = ref_dt.year();
+
+    // If weekday is given, test candidate years [ref_year, ref_year + 1, ref_year - 1] to see which matches
+    if let Some(target_weekday) = weekday_opt {
+        for candidate_year in [ref_year, ref_year + 1, ref_year - 1] {
+            if let Some(d) = NaiveDate::from_ymd_opt(candidate_year, month, day) {
+                if d.weekday() == target_weekday {
+                    return candidate_year;
+                }
+            }
+        }
+    }
+
+    // Default heuristic: if date is more than 30 days in the past of the reference year, assume next year
+    if let Some(d_curr) = NaiveDate::from_ymd_opt(ref_year, month, day) {
+        if d_curr < ref_dt.date_naive() - Duration::days(60) {
+            return ref_year + 1;
+        }
+    }
+
+    ref_year
+}
+
+fn extract_date(text: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> {
+    let clean_text = text.replace('\n', " ");
+
+    // Relative dates: "today", "tomorrow", "this friday", "next monday"
+    let rel_regex = Regex::new(r"(?i)\b(today|tomorrow|this\s+(?:mon|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?|next\s+(?:mon|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?)\b").unwrap();
+    if let Some(caps) = rel_regex.captures(&clean_text) {
+        let matched = caps.get(1).unwrap().as_str().to_lowercase();
+        if matched == "today" {
+            return Some(ref_dt.date_naive());
+        }
+        if matched == "tomorrow" {
+            return Some(ref_dt.date_naive() + Duration::days(1));
+        }
+        if matched.starts_with("this ") || matched.starts_with("next ") {
+            let parts: Vec<&str> = matched.split_whitespace().collect();
+            if parts.len() == 2 {
+                if let Some(target_w) = weekday_to_num(parts[1]) {
+                    let mut d = ref_dt.date_naive();
+                    let is_next = parts[0] == "next";
+                    if is_next {
+                        d = d + Duration::days(7);
+                    }
+                    for _ in 0..7 {
+                        if d.weekday() == target_w {
+                            return Some(d);
+                        }
+                        d = d + Duration::days(1);
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 1: Day of week + Day + Month (e.g. "SATURDAY 12 September" or "SATURDAY 12\nSeptember")
+    let day_month_regex = Regex::new(r"(?i)\b(?:(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?:\s*,?\s*(\d{4}|\d{2}))?\b").unwrap();
+    if let Some(caps) = day_month_regex.captures(&clean_text) {
+        let weekday_opt = caps.get(1).and_then(|w| weekday_to_num(w.as_str()));
+        let day: u32 = caps.get(2).unwrap().as_str().parse().ok()?;
+        let month_str = caps.get(3).unwrap().as_str();
+        let month = month_to_num(month_str)?;
+        let year = if let Some(y_cap) = caps.get(4) {
+            let mut y: i32 = y_cap.as_str().parse().ok()?;
+            if y < 100 {
+                y += 2000;
+            }
+            y
+        } else {
+            resolve_year(month, day, weekday_opt, ref_dt)
+        };
+
+        if let Some(d) = NaiveDate::from_ymd_opt(year, month, day) {
+            return Some(d);
+        }
+    }
+
+    // Pattern 2: Month + Day + (Year) (e.g. "September 12", "Sept 12th, 2026", "October 5")
+    let month_day_regex = Regex::new(r"(?i)\b(?:(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s*,?\s*)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}|\d{2}))?\b").unwrap();
+    if let Some(caps) = month_day_regex.captures(&clean_text) {
+        let weekday_opt = caps.get(1).and_then(|w| weekday_to_num(w.as_str()));
+        let month_str = caps.get(2).unwrap().as_str();
+        let month = month_to_num(month_str)?;
+        let day: u32 = caps.get(3).unwrap().as_str().parse().ok()?;
+        let year = if let Some(y_cap) = caps.get(4) {
+            let mut y: i32 = y_cap.as_str().parse().ok()?;
+            if y < 100 {
+                y += 2000;
+            }
+            y
+        } else {
+            resolve_year(month, day, weekday_opt, ref_dt)
+        };
+
+        if let Some(d) = NaiveDate::from_ymd_opt(year, month, day) {
+            return Some(d);
+        }
+    }
+
+    // Pattern 3: Numeric date MM/DD/YYYY, MM/DD/YY, YYYY-MM-DD
+    let numeric_regex = Regex::new(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b|\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b").unwrap();
+    if let Some(caps) = numeric_regex.captures(&clean_text) {
+        if let (Some(y), Some(m), Some(d)) = (caps.get(1), caps.get(2), caps.get(3)) {
+            let year: i32 = y.as_str().parse().ok()?;
+            let month: u32 = m.as_str().parse().ok()?;
+            let day: u32 = d.as_str().parse().ok()?;
+            if let Some(res) = NaiveDate::from_ymd_opt(year, month, day) {
+                return Some(res);
+            }
+        } else if let (Some(m), Some(d), Some(y)) = (caps.get(4), caps.get(5), caps.get(6)) {
+            let month: u32 = m.as_str().parse().ok()?;
+            let day: u32 = d.as_str().parse().ok()?;
+            let mut year: i32 = y.as_str().parse().ok()?;
+            if year < 100 {
+                year += 2000;
+            }
+            if let Some(res) = NaiveDate::from_ymd_opt(year, month, day) {
+                return Some(res);
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_hour_min(hour_str: &str, min_str: Option<&str>, ampm_str: Option<&str>, default_is_pm: bool) -> Option<NaiveTime> {
+    let mut hour: u32 = hour_str.parse().ok()?;
+    let minute: u32 = if let Some(m) = min_str {
+        m.parse().ok()?
+    } else {
+        0
+    };
+
+    if let Some(ampm) = ampm_str {
+        let is_pm = ampm.to_lowercase().contains('p');
+        let is_am = ampm.to_lowercase().contains('a');
+        if is_pm && hour < 12 {
+            hour += 12;
+        } else if is_am && hour == 12 {
+            hour = 0;
+        }
+    } else if default_is_pm && hour < 12 && hour != 12 {
+        hour += 12;
+    }
+
+    NaiveTime::from_hms_opt(hour, minute, 0)
+}
+
+fn extract_times(text: &str) -> Option<(NaiveTime, Option<NaiveTime>)> {
+    let clean_text = text.replace('\n', " ");
+
+    // Pattern 1: Time range like "12-5pm", "12:00 PM - 5:00 PM", "7:00pm - 10:00pm", "12pm - 5pm", "10am to 2pm"
+    let range_regex = Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\s*(?:-|–|—|to|until)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b").unwrap();
+    if let Some(caps) = range_regex.captures(&clean_text) {
+        let start_hour_str = caps.get(1).unwrap().as_str();
+        let start_min_str = caps.get(2).map(|m| m.as_str());
+        let start_ampm_str = caps.get(3).map(|m| m.as_str());
+
+        let end_hour_str = caps.get(4).unwrap().as_str();
+        let end_min_str = caps.get(5).map(|m| m.as_str());
+        let end_ampm_str = caps.get(6).map(|m| m.as_str());
+
+        let end_is_pm = end_ampm_str.map(|s| s.to_lowercase().contains('p')).unwrap_or(false);
+
+        // Infer start am/pm if omitted
+        let start_ampm = if start_ampm_str.is_some() {
+            start_ampm_str
+        } else {
+            let start_h: u32 = start_hour_str.parse().unwrap_or(0);
+            let end_h: u32 = end_hour_str.parse().unwrap_or(0);
+            if start_h == 12 && end_is_pm {
+                Some("pm")
+            } else if end_is_pm && start_h <= end_h {
+                Some("pm")
+            } else if end_is_pm && start_h > end_h && start_h >= 8 && start_h <= 11 {
+                // E.g. "9 - 2pm" -> 9am - 2pm
+                Some("am")
+            } else if end_is_pm && start_h > end_h {
+                Some("pm")
+            } else {
+                end_ampm_str
+            }
+        };
+
+        let start_time = parse_hour_min(start_hour_str, start_min_str, start_ampm, false)?;
+        let end_time = parse_hour_min(end_hour_str, end_min_str, end_ampm_str, false)?;
+
+        return Some((start_time, Some(end_time)));
+    }
+
+    // Pattern 2: 24h range "18:00 - 21:30"
+    let range_24h_regex = Regex::new(r"\b(\d{1,2}):(\d{2})\s*(?:-|–|—|to)\s*(\d{1,2}):(\d{2})\b").unwrap();
+    if let Some(caps) = range_24h_regex.captures(&clean_text) {
+        let s_h: u32 = caps.get(1).unwrap().as_str().parse().ok()?;
+        let s_m: u32 = caps.get(2).unwrap().as_str().parse().ok()?;
+        let e_h: u32 = caps.get(3).unwrap().as_str().parse().ok()?;
+        let e_m: u32 = caps.get(4).unwrap().as_str().parse().ok()?;
+
+        let start_time = NaiveTime::from_hms_opt(s_h, s_m, 0)?;
+        let end_time = NaiveTime::from_hms_opt(e_h, e_m, 0)?;
+        return Some((start_time, Some(end_time)));
+    }
+
+    // Pattern 3: Single time "at 7:00 PM", "doors at 8pm", "starts at 6:30pm", "7pm", "19:00"
+    let single_regex = Regex::new(r"(?i)(?:at|@|starts?|begins?|time:?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b|\b(\d{1,2})(?::(\d{2}))\s*(am|pm|a\.m\.|p\.m\.)\b").unwrap();
+    if let Some(caps) = single_regex.captures(&clean_text) {
+        let (hour_str, min_str, ampm_str) = if caps.get(1).is_some() {
+            (caps.get(1).unwrap().as_str(), caps.get(2).map(|m| m.as_str()), caps.get(3).map(|m| m.as_str()))
+        } else {
+            (caps.get(4).unwrap().as_str(), caps.get(5).map(|m| m.as_str()), caps.get(6).map(|m| m.as_str()))
+        };
+
+        let start_time = parse_hour_min(hour_str, min_str, ampm_str, false)?;
+        return Some((start_time, None));
+    }
+
+    // Keyword: "noon" -> 12:00, "midnight" -> 00:00
+    if clean_text.to_lowercase().contains("noon") {
+        return Some((NaiveTime::from_hms_opt(12, 0, 0).unwrap(), None));
+    }
+
+    None
+}
+
+fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
+    // 1. Explicit marker: "This year at ...", "Location: ...", "Venue: ...", "Where: ..."
+    let explicit_marker_regex = Regex::new(r"(?i)(?:this year at|held at|venue:|location:|where:|place:|live at|takes place at)\s*(.*)").unwrap();
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(caps) = explicit_marker_regex.captures(line) {
+            let mut loc = caps.get(1).unwrap().as_str().trim().to_string();
+            if loc.is_empty() && i + 1 < lines.len() {
+                loc = lines[i + 1].trim().to_string();
+            }
+
+            // Append street / avenue / park / room details if on subsequent lines
+            let mut extra_idx = i + 1;
+            while extra_idx < lines.len() && extra_idx <= i + 3 {
+                let next_line = lines[extra_idx].trim();
+                if next_line.starts_with('*') || next_line.starts_with('-') || next_line.len() > 60 {
+                    break;
+                }
+                let lower = next_line.to_lowercase();
+                if lower.contains("street") || lower.contains("st") || lower.contains("ave")
+                    || lower.contains("park") || lower.contains("skilton") || lower.contains("blvd")
+                    || lower.contains("road") || lower.contains("room") || lower.contains("and ") {
+                    if !loc.contains(next_line) {
+                        loc = format!("{}, {}", loc, next_line);
+                    }
+                }
+                extra_idx += 1;
+            }
+
+            let cleaned = clean_location_string(&loc);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+
+    // 2. Scan for address / venue keywords in lines
+    let venue_keywords = [
+        "PARK", "SQUARE", "HALL", "CENTER", "CENTRE", "AUDITORIUM", "STREET", "ST.",
+        "AVENUE", "AVE", "BOULEVARD", "BLVD", "ROAD", "RD", "DRIVE", "DR", "PLAZA",
+        "ROOM", "CLUB", "THEATRE", "THEATER", "BAR", "GRILL", "CAFE", "BREWERY",
+        "CHURCH", "LIBRARY", "MUSEUM", "GARDEN", "GARDENS", "STADIUM", "ARENA",
+        "FIELD", "HOUSE", "LOUNGE", "HQ", "CAMPUS", "HUB", "STUDIO", "BUILDING",
+        "TOWER", "GALLERY", "SPACE", "OFFICE", "PAVILION", "COMMONS", "HOTEL",
+        "RESTAURANT", "TAVERN", "PUB", "ZOOM", "GOOGLE MEET", "TEAMS", "WEBEX", "DISCORD",
+    ];
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Skip obvious header, metadata, or pure date/time lines
+        if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
+            || upper.contains("FOR ADA") || upper.contains("ACCOMMODATIONS") || upper.contains("311")
+            || upper.contains("RAIN DATE") || upper.contains("ART BY:") || upper.len() < 3
+            || is_date_or_time_line(&upper) {
+            continue;
+        }
+
+        // Check if this line contains a venue keyword
+        let has_venue_kw = venue_keywords.iter().any(|&kw| {
+            if kw.len() <= 3 {
+                upper.split_whitespace().any(|word| word == kw || word.trim_matches(|c: char| !c.is_alphanumeric()) == kw)
+            } else {
+                upper.contains(kw)
+            }
+        });
+
+        if has_venue_kw {
+            let mut loc = trimmed.to_string();
+            if i + 1 < lines.len() {
+                let next = lines[i + 1].trim();
+                let next_upper = next.to_uppercase();
+                if (next_upper.contains("STREET") || next_upper.contains("AVE") || next_upper.contains("ST.")
+                    || next_upper.contains("ROAD") || next_upper.contains("ROOM"))
+                    && !next.starts_with('*') && !is_date_or_time_line(&next_upper) {
+                    loc = format!("{}, {}", loc, next);
+                }
+            }
+            let cleaned = clean_location_string(&loc);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+
+    None
+}
+
+fn clean_location_string(s: &str) -> String {
+    let mut cleaned = s.trim().trim_matches(|c: char| c == ',' || c == '.' || c == ':' || c == '-' || c == '*').trim().to_string();
+    cleaned = cleaned.replace("  ", " ");
+    cleaned
+}
+
+fn is_time_pattern(s: &str) -> bool {
+    let time_12h_regex = Regex::new(r"(?i)\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b|\b\d{1,2}\s*(?:-|–|—|to)\s*\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)\b").unwrap();
+    let time_24h_regex = Regex::new(r"\b\d{1,2}:\d{2}\b").unwrap();
+    time_12h_regex.is_match(s) || time_24h_regex.is_match(s)
+}
+
+fn is_date_pattern(s: &str) -> bool {
+    let num_date_regex = Regex::new(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{4}-\d{1,2}-\d{1,2}\b").unwrap();
+    if num_date_regex.is_match(s) {
+        return true;
+    }
+
+    let month_day_regex = Regex::new(r"(?i)\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b").unwrap();
+    let weekday_day_regex = Regex::new(r"(?i)\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\b").unwrap();
+    month_day_regex.is_match(s) || weekday_day_regex.is_match(s)
+}
+
+fn is_noise_or_metadata_line(s: &str) -> bool {
+    let trimmed = s.trim();
+    if trimmed.len() < 3 {
+        return true;
+    }
+    let phone_regex = Regex::new(r"\b\d{3}[-.)\s]+\d{3}[-.\s]+\d{4}\b|\b311\b").unwrap();
+    if phone_regex.is_match(trimmed) {
+        return true;
+    }
+    if trimmed.chars().all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace()) {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if (lower.contains("accommodations") || lower.contains("interpreter") || lower.contains("contact")) && lower.contains("311") {
+        return true;
+    }
+    false
+}
+
+fn is_date_or_time_line(s: &str) -> bool {
+    is_time_pattern(s) || is_date_pattern(s)
+}
+
+fn extract_title(lines: &[&str], _full_text: &str) -> String {
+    let event_keywords = [
+        "FESTIVAL", "CONCERT", "PARTY", "CELEBRATION", "MEETUP", "MEETING",
+        "CONFERENCE", "SUMMIT", "WORKSHOP", "SYMPOSIUM", "WEBINAR", "SHOW",
+        "EXHIBITION", "FAIR", "GALA", "DINNER", "BRUNCH", "FUNDRAISER",
+        "PARADE", "MARKET", "BLOCK PARTY", "OPEN MIC", "GAME NIGHT", "TRIVIA",
+        "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING",
+    ];
+
+    let mut candidate_titles: Vec<(String, usize, i32)> = Vec::new();
+
+    for (idx, &line) in lines.iter().enumerate().take(8) {
+        let trimmed = line.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Skip bullet lines, metadata lines, phone numbers, pure dates/times, etc.
+        if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
+            || is_noise_or_metadata_line(trimmed)
+            || is_date_or_time_line(trimmed) {
+            continue;
+        }
+
+        // Strong position boost for the top lines
+        let mut score: i32 = match idx {
+            0 => 35,
+            1 => 25,
+            2 => 15,
+            3 => 10,
+            _ => 5 - (idx as i32),
+        };
+
+        // Boost for event keywords
+        for &kw in &event_keywords {
+            if upper.contains(kw) {
+                score += 25;
+            }
+        }
+
+        // If uppercase or Title Cased, add a boost
+        if upper == trimmed && trimmed.len() > 5 {
+            score += 5;
+        }
+
+        // Check if preceding line is a brand/prefix (e.g. "SOMERSTREETS" before "GILMAN SQUARE ARTS & MUSIC FESTIVAL")
+        if idx > 0 {
+            let prev = lines[idx - 1].trim();
+            if !prev.starts_with('*') && !prev.starts_with('-') && !prev.ends_with(':')
+                && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev) && prev.len() > 3 && prev.len() < 30 {
+                let combined = format!("{}: {}", prev, trimmed);
+                candidate_titles.push((combined, idx, score + 10));
+            }
+        }
+
+        candidate_titles.push((trimmed.to_string(), idx, score));
+    }
+
+    if let Some((best_title, _, _)) = candidate_titles.into_iter().max_by_key(|item| item.2) {
+        let clean = best_title.trim_matches(|c: char| c == '*' || c == '-' || c == ':').trim();
+        return clean.to_string();
+    }
+
+    // Fallback: first non-trivial line
+    for &line in lines.iter().take(4) {
+        let t = line.trim();
+        if t.len() > 3 && !t.contains(':') && !t.starts_with('*') && !is_noise_or_metadata_line(t) && !is_date_or_time_line(t) {
+            return t.to_string();
+        }
+    }
+
+    "Event".to_string()
+}
+
+fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> Option<String> {
+    let mut bullet_points: Vec<String> = Vec::new();
+
+    let title_upper = title.to_uppercase();
+    let loc_upper = location.map(|l| l.to_uppercase()).unwrap_or_default();
+
+    for &line in lines {
+        let trimmed = line.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Skip title, location, noise/metadata
+        if title_upper.contains(&upper) || (!loc_upper.is_empty() && loc_upper.contains(&upper)) {
+            continue;
+        }
+        if is_noise_or_metadata_line(trimmed) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 4 {
+            continue;
+        }
+        // Keep bullet points, activity highlights, rain dates, special notes
+        if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
+            || upper.contains("LIVE MUSIC") || upper.contains("PERFORMANCES") || upper.contains("BEER GARDEN")
+            || upper.contains("FOOD VENDORS") || upper.contains("ARTISTS") || upper.contains("ACTIVITIES")
+            || upper.contains("RAIN DATE") || upper.contains("FREE ADMISSION") || upper.contains("ALL AGES")
+            || upper.contains("SPEAKERS") || upper.contains("PIZZA") || upper.contains("DRINKS") {
+            let clean_bullet = trimmed.trim_start_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
+            if !clean_bullet.is_empty() && !bullet_points.iter().any(|b| b == clean_bullet) {
+                bullet_points.push(clean_bullet.to_string());
+            }
+        }
+    }
+
+    if !bullet_points.is_empty() {
+        Some(bullet_points.join(" • "))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_reference_context() -> ReferenceContext {
+        ReferenceContext {
+            reference_time: Some("2026-09-06T10:57:00-04:00".to_string()),
+            timezone_offset_minutes: Some(-240), // EDT
+        }
+    }
+
+    #[test]
+    fn test_parse_gilman_flyer_deterministic() {
+        let ocr_text = r#"MAN:
+SOMERSTREETS
+GILMAN SQUARE
+ARTS & MUSIC FESTIVAL
+SATURDAY 12
+September -
+12-5pm
+Rain Date 09/13/26
+LIVE MUSIC &
+PERFORMANCES
+*BEER GARDEN
+*FOOD VENDORS
+*ARTISTS&MAKERS
+*KIDS ACTIVITIES
+FOR FESTIVAL UPDATES & BAND INFO FOLLOW
+the GSNC
+art by: BEARDED TALES OF WOE
+Mass
+MC Council
+Council
+*STARA
+GSNC
+ELMAN SQUARE NBEHBORHOOD COUNCI
+McMAHON
+PLUMBING & HEATING
+PARADIGM
+WINTER HILL
+EVENTTHEM MARKMENT
+This year at
+Ed Leathers Park
+Walnut Street
+and Skilton Ave
+300
+For ADA accommodations or to request
+an interpreter in your language, please
+contact 311(617-666-3311) in advance.
+CHOLES
+NO EGU"#;
+
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        assert!(
+            event.title.contains("GILMAN SQUARE") || event.title.contains("FESTIVAL"),
+            "Title should contain event name, got: {}",
+            event.title
+        );
+
+        assert!(event.start_time.is_some(), "Start time should be extracted");
+        let start_time = event.start_time.unwrap();
+        assert!(
+            start_time.starts_with("2026-09-12T12:00:00"),
+            "Start time should be 2026-09-12 at 12:00, got: {}",
+            start_time
+        );
+
+        assert!(event.end_time.is_some(), "End time should be extracted");
+        let end_time = event.end_time.unwrap();
+        assert!(
+            end_time.starts_with("2026-09-12T17:00:00"),
+            "End time should be 2026-09-12 at 17:00 (5pm), got: {}",
+            end_time
+        );
+
+        assert!(event.location.is_some(), "Location should be extracted");
+        let loc = event.location.unwrap();
+        assert!(
+            loc.contains("Ed Leathers Park") || loc.contains("Walnut Street"),
+            "Location should contain Ed Leathers Park / Walnut Street, got: {}",
+            loc
+        );
+
+        assert!(event.description.is_some(), "Description should be extracted");
+        let desc = event.description.unwrap();
+        assert!(
+            desc.contains("BEER GARDEN") || desc.contains("FOOD VENDORS") || desc.contains("LIVE MUSIC"),
+            "Description should contain activities, got: {}",
+            desc
+        );
+
+        assert!(event.confidence >= 0.7, "Confidence should be high, got: {}", event.confidence);
+    }
+
+    #[test]
+    fn test_parse_dinner_invitation_relative_date() {
+        let text = "Hey! Let's do dinner this Friday at 7:30pm at Mario's Italian Restaurant on 5th Ave.";
+        let ctx = sample_reference_context(); // Reference is Sunday 2026-09-06
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(event.start_time.is_some());
+        let start_time = event.start_time.unwrap();
+        // This Friday from Sunday Sep 6 is Friday Sep 11, 2026
+        assert!(
+            start_time.starts_with("2026-09-11T19:30:00"),
+            "Expected 2026-09-11T19:30:00, got: {}",
+            start_time
+        );
+    }
+
+    #[test]
+    fn test_parse_meetup_structured() {
+        let text = r#"Rust & AI Meetup
+Thursday, October 15, 2026
+6:00 PM - 8:30 PM
+MIT Stata Center, Room 32-123
+*Pizza and drinks provided
+*Talks on WebAssembly and LLMs"#;
+
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(event.title.contains("Meetup") || event.title.contains("Rust"));
+        assert_eq!(event.start_time.as_deref(), Some("2026-10-15T18:00:00-04:00"));
+        assert_eq!(event.end_time.as_deref(), Some("2026-10-15T20:30:00-04:00"));
+        assert!(event.location.unwrap().contains("MIT Stata Center"));
+        assert!(event.description.unwrap().contains("Pizza"));
+    }
+
+    #[test]
+    fn test_gbnf_grammar_and_json_schema() {
+        let grammar = get_gbnf_grammar();
+        assert!(grammar.contains("root ::="));
+        assert!(grammar.contains(r#"\"title\":"#));
+        assert!(grammar.contains(r#"\"start_time\":"#));
+        let schema = get_json_schema();
+        assert_eq!(schema["title"], "EventDetails");
+        assert!(schema["properties"]["start_time"].is_object());
+    }
+
+    #[test]
+    fn test_dynamic_context_injection_prompt() {
+        let ctx = sample_reference_context();
+        let prompt = generate_extraction_prompt("Concert tomorrow at 8pm", &ctx);
+        assert!(prompt.contains("Current Reference Time: 2026-09-06T10:57:00-04:00 (Sunday)"));
+        assert!(prompt.contains("Concert tomorrow at 8pm"));
+    }
+
+    #[test]
+    fn test_parse_all_day_event() {
+        let text = "Community Clean-up Day\nSaturday, April 18, 2026\nLincoln Park\n*Bring gloves and water bottles";
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(event.is_all_day);
+        assert!(event.title.contains("Clean-up") || event.title.contains("Community"));
+        assert!(event.start_time.unwrap().starts_with("2026-04-18"));
+        assert!(event.location.unwrap().contains("Lincoln Park"));
+        assert!(event.description.unwrap().contains("Bring gloves"));
+    }
+
+    #[test]
+    fn test_parse_24h_time_range() {
+        let text = "Developer Workshop\n2026-10-05\n14:00 - 16:30\nInnovation Hub, Room 101";
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(!event.is_all_day);
+        assert_eq!(event.start_time.as_deref(), Some("2026-10-05T14:00:00-04:00"));
+        assert_eq!(event.end_time.as_deref(), Some("2026-10-05T16:30:00-04:00"));
+        assert!(event.location.unwrap().contains("Innovation Hub"));
+    }
+
+    #[test]
+    fn test_parse_tomorrow_relative_date() {
+        let text = "Team Sync\nTomorrow at 3pm\nZoom Meeting";
+        let ctx = sample_reference_context(); // Reference 2026-09-06 (Sunday)
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(!event.is_all_day);
+        // Tomorrow from Sunday Sep 6 is Monday Sep 7, 2026 at 15:00
+        assert_eq!(event.start_time.as_deref(), Some("2026-09-07T15:00:00-04:00"));
+        assert!(event.location.unwrap().to_lowercase().contains("zoom"));
+    }
+
+    #[test]
+    fn test_titles_with_month_weekday_or_time_substrings() {
+        let ctx = sample_reference_context();
+
+        let text1 = "September Fest\nSaturday, September 12, 2026\n12-5pm\nEd Leathers Park";
+        let event1 = parse_event_deterministic(text1, &ctx);
+        assert_eq!(event1.title, "September Fest");
+
+        let text2 = "Saturday Night Live Jam\n2026-11-20\n8:00 PM\nDowntown Lounge";
+        let event2 = parse_event_deterministic(text2, &ctx);
+        assert_eq!(event2.title, "Saturday Night Live Jam");
+
+        let text3 = "Summer Program Launch\nJuly 15, 2026\n10:00 AM\nAuditorium A";
+        let event3 = parse_event_deterministic(text3, &ctx);
+        assert_eq!(event3.title, "Summer Program Launch");
+
+        let text4 = "Team BBQ Celebration\nAugust 8, 2026\n1:00 PM - 5:00 PM\nCity Park";
+        let event4 = parse_event_deterministic(text4, &ctx);
+        assert_eq!(event4.title, "Team BBQ Celebration");
+    }
+}

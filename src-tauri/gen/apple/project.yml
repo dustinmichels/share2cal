@@ -12,6 +12,7 @@ settingGroups:
     base:
       PRODUCT_NAME: share2cal
       PRODUCT_BUNDLE_IDENTIFIER: com.dustinmichels.share2cal
+      DEVELOPMENT_TEAM: LLM5F36KYW
 targetTemplates:
   app:
     type: application
@@ -53,8 +54,16 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.dustinmichels.share2cal
+            CFBundleURLSchemes:
+              - share2cal
     entitlements:
       path: share2cal_iOS/share2cal_iOS.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dustinmichels.share2cal
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -70,6 +79,7 @@ targets:
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
     dependencies:
+      - target: ShareExtension
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework
@@ -82,9 +92,45 @@ targets:
       - sdk: Vision.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: export PATH="$HOME/.local/share/mise/shims:$HOME/.local/share/mise/installs/node/latest/bin:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; bun tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code
         basedOnDependencyAnalysis: false
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: "0.1.0"
+        CFBundleDisplayName: "share2cal"
+        NSExtension:
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: ShareViewController
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dustinmichels.share2cal
+    settings:
+      base:
+        PRODUCT_NAME: ShareExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.dustinmichels.share2cal.ShareExtension
+        DEVELOPMENT_TEAM: LLM5F36KYW
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        ENABLE_BITCODE: false
+        ARCHS: [arm64]
+        VALID_ARCHS: arm64
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: UIKit.framework
+      - sdk: UniformTypeIdentifiers.framework
+      - sdk: MobileCoreServices.framework
