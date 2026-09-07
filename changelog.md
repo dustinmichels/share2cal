@@ -14,7 +14,7 @@
   - Model deletion and integrity verification methods.
 - **Tauri IPC Commands (`src-tauri/src/lib.rs`)**: Registered `get_model_manifest`, `get_model_statuses`, `get_model_status`, `download_model`, `cancel_model_download`, `delete_model`, `verify_model_hash`, and `get_models_storage_info`.
 - **Model Client Service (`src/services/model.ts`)**: Typed TypeScript IPC wrapper and event listener for model operations and progress streams.
-- **Model Settings Modal (`src/components/ModelSettingsModal.vue`)**:
+- **Settings View (`src/components/SettingsView.vue`)**:
   - Storage overview displaying space used by models, free disk space, and exact local storage path with copy action.
   - Per-model status cards indicating `Ready on Device`, `Downloading`, or `Not Downloaded`.
   - Active download progress bar with live transfer rate and cancel button.

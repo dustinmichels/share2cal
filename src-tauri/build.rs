@@ -13,6 +13,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=ImageIO");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=EventKit");
+        println!("cargo:rustc-link-lib=framework=Metal");
+        println!("cargo:rustc-link-lib=framework=MetalKit");
+        println!("cargo:rustc-link-lib=framework=Accelerate");
     }
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=build.rs");

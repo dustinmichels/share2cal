@@ -183,6 +183,20 @@ export async function verifyModelHash(modelId: string): Promise<boolean> {
 }
 
 /**
+ * Unloads the currently active LLM inference model from memory / Metal GPU.
+ */
+export async function unloadInferenceModel(): Promise<void> {
+  return await invoke("unload_inference_model");
+}
+
+/**
+ * Checks whether a specific inference model is currently loaded in memory.
+ */
+export async function isInferenceModelLoaded(modelId: string): Promise<boolean> {
+  return await invoke<boolean>("is_inference_model_loaded", { modelId });
+}
+
+/**
  * Gets storage information (total downloaded models, space used, free space).
  */
 export async function getModelsStorageInfo(): Promise<ModelsStorageInfo | null> {

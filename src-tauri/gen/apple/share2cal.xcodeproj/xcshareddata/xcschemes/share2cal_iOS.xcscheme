@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "2598BAB34C32DB29AA83F36D"
-               BuildableName = "share2cal.app"
+               BuildableName = "Share2Cal.app"
                BlueprintName = "share2cal_iOS"
                ReferencedContainer = "container:share2cal.xcodeproj">
             </BuildableReference>
@@ -31,7 +31,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2598BAB34C32DB29AA83F36D"
-            BuildableName = "share2cal.app"
+            BuildableName = "Share2Cal.app"
             BlueprintName = "share2cal_iOS"
             ReferencedContainer = "container:share2cal.xcodeproj">
          </BuildableReference>
@@ -66,7 +66,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2598BAB34C32DB29AA83F36D"
-            BuildableName = "share2cal.app"
+            BuildableName = "Share2Cal.app"
             BlueprintName = "share2cal_iOS"
             ReferencedContainer = "container:share2cal.xcodeproj">
          </BuildableReference>
@@ -95,7 +95,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2598BAB34C32DB29AA83F36D"
-            BuildableName = "share2cal.app"
+            BuildableName = "Share2Cal.app"
             BlueprintName = "share2cal_iOS"
             ReferencedContainer = "container:share2cal.xcodeproj">
          </BuildableReference>

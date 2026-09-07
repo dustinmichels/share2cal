@@ -28,8 +28,10 @@ regex = "1.11"
 sha2 = "0.10"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "rt", "fs", "io-util"] }
+tokio = { version = "1", features = ["sync", "rt", "fs", "io-util", "macros"] }
 libc = "0.2"
+llama-cpp-2 = { version = "0.1.156", default-features = false, features = ["metal"] }
+encoding_rs = "0.8.40"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

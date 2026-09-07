@@ -14,41 +14,41 @@
 
 ## 2. On-Device Storage & Download Manager
 
-- [ ] **Device Storage Pre-flight Check**:
-  - Implement native storage check via Rust/Objective-C to ensure free disk space $\ge 2.5\times$ the model size before starting download.
-- [ ] **Resumable HTTP Download Manager**:
+- [x] **Device Storage Pre-flight Check**:
+  - Implement native storage check via Rust/Objective-C to ensure free disk space $\ge 1.5\times$ the model size before starting download.
+- [x] **Resumable HTTP Download Manager**:
   - Implement chunked download manager with HTTP Range header support for pause/resume upon connection drops.
-  - Stream progress events (`download_progress: { received_bytes, total_bytes, percentage }`) over Tauri IPC to Vue UI.
-- [ ] **Integrity Verification & Persistent Sandboxing**:
+  - Stream progress events (`model_download_progress: { received_bytes, total_bytes, percentage, speed }`) over Tauri IPC to Vue UI.
+- [x] **Integrity Verification & Persistent Sandboxing**:
   - Compute and verify SHA-256 checksum upon completion.
-  - Move validated model file into persistent sandbox directory (`Library/Application Support/models/` on iOS, `no_backup/models/` on Android).
+  - Move validated model file into persistent sandbox directory (`Library/Application Support/models/` on iOS, `models/` in app data dir).
   - Implement cache invalidation and clean deletion methods.
 
 ---
 
 ## 3. Local Inference Engine Integration (`llama.cpp`)
 
-- [ ] **Link `llama.cpp` Engine**:
-  - Integrate `llama.cpp` via Rust FFI (`llama-cpp-2` crate or custom C++ FFI bridge).
-  - Enable Apple Metal GPU backend (`GGML_METAL=ON`) in iOS build pipeline (`project.yml` / `build_rust.sh`).
-- [ ] **Configure Memory & Resource Constraints**:
-  - Set context window strictly to 1024 or 2048 tokens to minimize KV cache footprint.
-  - Cap thread count according to device efficiency/performance cores.
-- [ ] **Constrained Decoding with GBNF**:
-  - Hook `get_gbnf_grammar()` (`src-tauri/src/parser.rs`) into `llama.cpp` sampler to guarantee deterministic JSON output conforming to `EventDetails`.
-- [ ] **Async Inference Pipeline**:
-  - Execute inference on dedicated background worker thread / Tokio blocking task pool with high QoS so the Tauri main thread / Webview UI never hitches.
+- [x] **Link `llama.cpp` Engine**:
+  - Integrate `llama.cpp` via Rust FFI (`llama-cpp-2` crate with Metal support).
+  - Enable Apple Metal GPU backend in build configuration and Xcode pipeline (`project.yml`, `build.rs`).
+- [x] **Configure Memory & Resource Constraints**:
+  - Set context window strictly to 2048 tokens (`DEFAULT_CONTEXT_WINDOW = 2048`) to minimize KV cache footprint.
+  - Cap thread count according to device efficiency/performance cores (capped to max 4 threads).
+- [x] **Constrained Decoding with GBNF**:
+  - Hook `get_gbnf_grammar()` (`src-tauri/src/parser.rs`) into `llama.cpp` sampler with `LlmEventOutput` to guarantee deterministic JSON output conforming to `EventDetails`.
+- [x] **Async Inference Pipeline**:
+  - Execute inference on dedicated background worker thread pool (`tokio::task::spawn_blocking`) with high QoS so the Tauri main thread / Webview UI never hitches.
 
 ---
 
 ## 4. Orchestration, Timeout & Fallback Routing
 
-- [ ] **Extraction Orchestrator**:
+- [x] **Extraction Orchestrator**:
   - Format input using `generate_extraction_prompt()` with reference time and timezone offsets.
-  - Execute LLM inference and deserialize structured JSON response.
-- [ ] **5-Second Timeout & Error Guard**:
-  - Add a 5.0-second execution deadline for model inference.
-- [ ] **Seamless Fallback Routing**:
+  - Execute LLM inference and deserialize structured JSON response via `extract_event_orchestrated()`.
+- [x] **5-Second Timeout & Error Guard**:
+  - Add a 5.0-second execution deadline (`tokio::time::timeout`) for model inference.
+- [x] **Seamless Fallback Routing**:
   - If model is not downloaded, inference errors out, or timeout triggers, automatically route OCR text to `parse_event_deterministic()`.
   - Annotate `EventDetails.source` as `"llm"` or `"deterministic_fallback"` with corresponding confidence metrics.
 
@@ -59,7 +59,7 @@
 - [ ] **Download Management Sheet / Modal**:
   - First-run prompt asking user to download the lightweight model for enhanced extraction.
   - Progress bar with download speed, percentage, pause/resume, and retry controls.
-- [ ] **Model Settings Panel**:
+- [x] **Model Settings Panel**:
   - Display current model status (Not Downloaded, Downloading, Ready, Storage Used).
   - Add button to delete downloaded model to reclaim storage.
 - [ ] **Source Badge in Review Form**:

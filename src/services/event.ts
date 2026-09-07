@@ -13,6 +13,16 @@ export interface EventDetails {
   source: string;
 }
 
+export interface EventFormData {
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  isAllDay: boolean;
+  location: string;
+  description: string;
+}
+
 export function getCurrentReferenceTime(): {
   referenceTime: string;
   timezoneOffsetMinutes: number;
@@ -29,12 +39,16 @@ export async function parseEventFromText(
   text: string,
   referenceTime?: string,
   timezoneOffsetMinutes?: number,
+  modelId?: string,
+  timeoutSecs?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails>("parse_event_from_text", {
     text,
     referenceTime: referenceTime ?? ref.referenceTime,
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
+    modelId,
+    timeoutSecs,
   });
 }
 
@@ -42,12 +56,16 @@ export async function extractEventFromImage(
   path: string,
   referenceTime?: string,
   timezoneOffsetMinutes?: number,
+  modelId?: string,
+  timeoutSecs?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails>("extract_event_from_image", {
     path,
     referenceTime: referenceTime ?? ref.referenceTime,
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
+    modelId,
+    timeoutSecs,
   });
 }
 
@@ -55,6 +73,8 @@ export async function extractEventFromImageBytes(
   bytes: Uint8Array | number[],
   referenceTime?: string,
   timezoneOffsetMinutes?: number,
+  modelId?: string,
+  timeoutSecs?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   const payload = bytes instanceof Uint8Array ? Array.from(bytes) : bytes;
@@ -62,6 +82,8 @@ export async function extractEventFromImageBytes(
     bytes: payload,
     referenceTime: referenceTime ?? ref.referenceTime,
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
+    modelId,
+    timeoutSecs,
   });
 }
 

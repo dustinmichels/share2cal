@@ -1,0 +1,453 @@
+use crate::model;
+use crate::parser::{self, EventDetails, ReferenceContext};
+use encoding_rs::UTF_8;
+use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::AddBos;
+use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::sampling::LlamaSampler;
+use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, OnceLock};
+use std::time::{Duration, Instant};
+use tauri::AppHandle;
+use tokio::sync::Mutex as TokioMutex;
+
+/// Intermediate struct matching the exact 6 JSON fields produced by the GBNF grammar
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LlmEventOutput {
+    pub title: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
+    pub location: Option<String>,
+    pub description: Option<String>,
+}
+
+impl LlmEventOutput {
+    pub fn into_event_details(self, source_name: &str) -> EventDetails {
+        EventDetails {
+            title: self.title,
+            start_time: self.start_time,
+            end_time: self.end_time,
+            is_all_day: self.is_all_day,
+            location: self.location,
+            description: self.description,
+            confidence: 0.95,
+            source: source_name.to_string(),
+        }
+    }
+}
+
+/// Default context window limit to minimize KV cache RAM footprint on mobile devices
+pub const DEFAULT_CONTEXT_WINDOW: u32 = 2048;
+
+/// Default maximum tokens generated for structured event JSON output
+pub const DEFAULT_MAX_GENERATION_TOKENS: usize = 512;
+
+/// Default inference timeout in seconds
+pub const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 5;
+
+static BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
+pub static ENGINE_MANAGER: LazyLock<InferenceEngineManager> = LazyLock::new(InferenceEngineManager::new);
+
+pub fn get_global_backend() -> Result<Arc<LlamaBackend>, String> {
+    if let Some(backend) = BACKEND.get() {
+        return Ok(Arc::clone(backend));
+    }
+    let backend = LlamaBackend::init().map_err(|e| format!("Failed to init llama backend: {}", e))?;
+    let backend_arc = Arc::new(backend);
+    let _ = BACKEND.set(Arc::clone(&backend_arc));
+    Ok(backend_arc)
+}
+
+/// Returns the optimal thread count for model execution.
+/// Capped at 4 to prevent device overheating and UI latency on mobile Apple/Android cores.
+pub fn get_optimal_thread_count() -> i32 {
+    let count = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4);
+    std::cmp::min(4, std::cmp::max(1, count))
+}
+
+pub struct LoadedModel {
+    pub model_id: String,
+    pub model_path: PathBuf,
+    pub model: Arc<LlamaModel>,
+}
+
+pub struct InferenceEngineManager {
+    loaded_model: TokioMutex<Option<LoadedModel>>,
+}
+
+impl InferenceEngineManager {
+    pub fn new() -> Self {
+        Self {
+            loaded_model: TokioMutex::new(None),
+        }
+    }
+
+    pub fn global() -> &'static InferenceEngineManager {
+        &ENGINE_MANAGER
+    }
+
+    pub async fn get_or_load_model(
+        &self,
+        model_id: &str,
+        model_path: &Path,
+    ) -> Result<Arc<LlamaModel>, String> {
+        let mut guard = self.loaded_model.lock().await;
+        if let Some(loaded) = &*guard {
+            if loaded.model_id == model_id && loaded.model_path == model_path {
+                return Ok(Arc::clone(&loaded.model));
+            }
+        }
+
+        let path_clone = model_path.to_path_buf();
+        let loaded_model = tokio::task::spawn_blocking(move || {
+            let backend = get_global_backend()?;
+            let mut model_params = LlamaModelParams::default();
+
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                // Offload all layers to Metal GPU on Apple platforms
+                model_params = model_params.with_n_gpu_layers(99);
+            }
+
+            LlamaModel::load_from_file(&backend, &path_clone, &model_params)
+                .map_err(|e| format!("Failed to load GGUF model from {:?}: {}", path_clone, e))
+        })
+        .await
+        .map_err(|e| format!("Model loading task panicked: {}", e))??;
+
+        let model_arc = Arc::new(loaded_model);
+        *guard = Some(LoadedModel {
+            model_id: model_id.to_string(),
+            model_path: model_path.to_path_buf(),
+            model: Arc::clone(&model_arc),
+        });
+
+        Ok(model_arc)
+    }
+
+    pub async fn unload_model(&self) {
+        let mut guard = self.loaded_model.lock().await;
+        *guard = None;
+    }
+
+    pub async fn is_model_loaded(&self, model_id: &str) -> bool {
+        let guard = self.loaded_model.lock().await;
+        if let Some(loaded) = &*guard {
+            loaded.model_id == model_id
+        } else {
+            false
+        }
+    }
+}
+
+/// Runs synchronous inference using llama.cpp with strict GBNF grammar constrained decoding.
+pub fn run_inference_sync(
+    model: &LlamaModel,
+    prompt: &str,
+    max_tokens: usize,
+    deadline: Option<Instant>,
+) -> Result<String, String> {
+    let backend = get_global_backend()?;
+    let thread_count = get_optimal_thread_count();
+
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(DEFAULT_CONTEXT_WINDOW))
+        .with_n_batch(512)
+        .with_n_threads(thread_count)
+        .with_n_threads_batch(thread_count);
+
+    let mut ctx = model
+        .new_context(&backend, ctx_params)
+        .map_err(|e| format!("Failed to create llama context: {}", e))?;
+
+    // Tokenize prompt
+    let tokens = model
+        .str_to_token(prompt, AddBos::Always)
+        .map_err(|e| format!("Failed to tokenize prompt: {}", e))?;
+
+    if tokens.is_empty() {
+        return Err("Prompt resulted in zero tokens".to_string());
+    }
+
+    if tokens.len() >= DEFAULT_CONTEXT_WINDOW as usize {
+        return Err(format!(
+            "Prompt exceeds context window limit ({} >= {})",
+            tokens.len(),
+            DEFAULT_CONTEXT_WINDOW
+        ));
+    }
+
+    // Process prompt tokens in batch
+    let batch_size = 512;
+    let mut batch = LlamaBatch::new(batch_size, 1);
+    let total_prompt_tokens = tokens.len();
+
+    for (i, &token) in tokens.iter().enumerate() {
+        let is_last = i == total_prompt_tokens - 1;
+        batch
+            .add(token, i as i32, &[0], is_last)
+            .map_err(|e| format!("Failed to add token to batch: {}", e))?;
+
+        if batch.n_tokens() >= batch_size as i32 || is_last {
+            ctx.decode(&mut batch)
+                .map_err(|e| format!("Failed to decode batch: {}", e))?;
+            batch.clear();
+        }
+    }
+
+    // Build constrained GBNF sampler chain
+    let grammar_str = parser::get_gbnf_grammar();
+    let grammar_sampler = LlamaSampler::grammar(model, grammar_str, "root")
+        .map_err(|e| format!("Failed to initialize GBNF grammar sampler: {}", e))?;
+    let greedy_sampler = LlamaSampler::greedy();
+    let mut sampler = LlamaSampler::chain_simple([grammar_sampler, greedy_sampler]);
+
+    let mut decoder = UTF_8.new_decoder();
+    let mut generated_text = String::new();
+    let mut current_pos = total_prompt_tokens as i32;
+
+    for _ in 0..max_tokens {
+        // Check cooperative deadline
+        if let Some(dl) = deadline {
+            if Instant::now() >= dl {
+                return Err("Inference deadline exceeded".to_string());
+            }
+        }
+
+        // Sample next token
+        let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+        sampler.accept(token);
+
+        // Check for EOS / EOG token
+        if model.is_eog_token(token) {
+            break;
+        }
+
+        // Decode token to string piece
+        let piece = model
+            .token_to_piece(token, &mut decoder, false, None)
+            .map_err(|e| format!("Failed to decode token to string piece: {}", e))?;
+        generated_text.push_str(&piece);
+
+        // If closing JSON brace is reached and JSON parses, stop early
+        if generated_text.trim_end().ends_with('}') {
+            if serde_json::from_str::<serde_json::Value>(generated_text.trim()).is_ok() {
+                break;
+            }
+        }
+
+        // Add generated token for next step decode
+        batch.clear();
+        batch
+            .add(token, current_pos, &[0], true)
+            .map_err(|e| format!("Failed to add generated token to batch: {}", e))?;
+
+        ctx.decode(&mut batch)
+            .map_err(|e| format!("Failed to decode generated token: {}", e))?;
+
+        current_pos += 1;
+        if current_pos >= DEFAULT_CONTEXT_WINDOW as i32 {
+            break;
+        }
+    }
+
+    Ok(generated_text)
+}
+
+/// Asynchronously runs inference on a background worker thread with strict timeout.
+pub async fn run_inference_async(
+    model: Arc<LlamaModel>,
+    prompt: String,
+    max_tokens: usize,
+    timeout_duration: Duration,
+) -> Result<String, String> {
+    let deadline = Instant::now() + timeout_duration;
+    let infer_future = tokio::task::spawn_blocking(move || {
+        run_inference_sync(&model, &prompt, max_tokens, Some(deadline))
+    });
+
+    match tokio::time::timeout(timeout_duration, infer_future).await {
+        Ok(join_res) => {
+            join_res.map_err(|e| format!("Inference worker panicked: {}", e))?
+        }
+        Err(_) => Err(format!(
+            "Inference timed out after {:.1} seconds",
+            timeout_duration.as_secs_f32()
+        )),
+    }
+}
+
+/// Orchestrates event extraction using local LLM inference with dynamic context injection,
+/// constrained GBNF sampling, 5-second timeout guard, and seamless deterministic fallback.
+pub async fn extract_event_orchestrated(
+    app: &AppHandle,
+    ocr_text: &str,
+    context: &ReferenceContext,
+    model_id_override: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> EventDetails {
+    let start_time = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_INFERENCE_TIMEOUT_SECS));
+
+    // Resolve target model ID
+    let manifest = match model::get_manifest() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[Inference] Failed to load manifest: {}. Using deterministic fallback.", e);
+            let mut event = parser::parse_event_deterministic(ocr_text, context);
+            event.source = "deterministic_fallback".to_string();
+            return event;
+        }
+    };
+
+    let target_model_id = model_id_override.unwrap_or(&manifest.default_model_id);
+
+    // Verify model file exists
+    let storage_dir = match model::get_storage_directory(app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("[Inference] Storage directory error: {}. Using fallback.", e);
+            let mut event = parser::parse_event_deterministic(ocr_text, context);
+            event.source = "deterministic_fallback".to_string();
+            return event;
+        }
+    };
+
+    let model_entry = manifest.models.iter().find(|m| m.id == target_model_id);
+    let filename = match model_entry {
+        Some(entry) => &entry.filename,
+        None => {
+            eprintln!("[Inference] Model ID '{}' not found in manifest. Using fallback.", target_model_id);
+            let mut event = parser::parse_event_deterministic(ocr_text, context);
+            event.source = "deterministic_fallback".to_string();
+            return event;
+        }
+    };
+
+    let model_path = storage_dir.join(filename);
+    if !model_path.exists() {
+        eprintln!("[Inference] Model file {:?} does not exist. Using deterministic fallback.", model_path);
+        let mut event = parser::parse_event_deterministic(ocr_text, context);
+        event.source = "deterministic_fallback".to_string();
+        return event;
+    }
+
+    // Load model
+    let engine = InferenceEngineManager::global();
+    let model = match engine.get_or_load_model(target_model_id, &model_path).await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[Inference] Failed to load model weights: {}. Using fallback.", e);
+            let mut event = parser::parse_event_deterministic(ocr_text, context);
+            event.source = "deterministic_fallback".to_string();
+            return event;
+        }
+    };
+
+    // Format prompt with dynamic reference context
+    let prompt = parser::generate_extraction_prompt(ocr_text, context);
+
+    // Run inference with timeout
+    match run_inference_async(model, prompt, DEFAULT_MAX_GENERATION_TOKENS, timeout).await {
+        Ok(raw_json) => {
+            let trimmed = raw_json.trim();
+            // Attempt to deserialize into LlmEventOutput conforming to GBNF grammar
+            match serde_json::from_str::<LlmEventOutput>(trimmed) {
+                Ok(llm_out) => {
+                    let event = llm_out.into_event_details("llm");
+                    eprintln!(
+                        "[Inference] Successfully extracted event via LLM ({}) in {:.2}s: {}",
+                        target_model_id,
+                        start_time.elapsed().as_secs_f32(),
+                        event.title
+                    );
+                    event
+                }
+                Err(parse_err) => {
+                    eprintln!(
+                        "[Inference] Failed to parse LLM output JSON: '{}' (raw: '{}'). Falling back to deterministic parser.",
+                        parse_err, trimmed
+                    );
+                    let mut fallback_event = parser::parse_event_deterministic(ocr_text, context);
+                    fallback_event.source = "deterministic_fallback".to_string();
+                    fallback_event
+                }
+            }
+        }
+        Err(infer_err) => {
+            eprintln!(
+                "[Inference] LLM inference failed / timed out ({:.2}s): {}. Falling back to deterministic parser.",
+                start_time.elapsed().as_secs_f32(),
+                infer_err
+            );
+            let mut fallback_event = parser::parse_event_deterministic(ocr_text, context);
+            fallback_event.source = "deterministic_fallback".to_string();
+            fallback_event
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_count_is_bounded() {
+        let threads = get_optimal_thread_count();
+        assert!(threads >= 1);
+        assert!(threads <= 4);
+    }
+
+    #[test]
+    fn test_llm_event_output_conversion() {
+        let raw_json = r#"{
+            "title": "Hackathon Demo Day",
+            "start_time": "2026-09-12T14:00:00-04:00",
+            "end_time": "2026-09-12T18:00:00-04:00",
+            "is_all_day": false,
+            "location": "Innovation Lab Room 101",
+            "description": "Final project presentations and awards ceremony."
+        }"#;
+
+        let parsed: LlmEventOutput = serde_json::from_str(raw_json).expect("Should parse GBNF json");
+        assert_eq!(parsed.title, "Hackathon Demo Day");
+        assert_eq!(parsed.start_time.as_deref(), Some("2026-09-12T14:00:00-04:00"));
+        assert_eq!(parsed.end_time.as_deref(), Some("2026-09-12T18:00:00-04:00"));
+        assert!(!parsed.is_all_day);
+        assert_eq!(parsed.location.as_deref(), Some("Innovation Lab Room 101"));
+        assert!(parsed.description.is_some());
+
+        let event = parsed.into_event_details("llm");
+        assert_eq!(event.source, "llm");
+        assert_eq!(event.confidence, 0.95);
+        assert_eq!(event.title, "Hackathon Demo Day");
+    }
+
+    #[test]
+    fn test_gbnf_grammar_contains_required_rules() {
+        let grammar = parser::get_gbnf_grammar();
+        assert!(grammar.contains("root ::="));
+        assert!(grammar.contains(r#"\"title\":"#));
+        assert!(grammar.contains(r#"\"start_time\":"#));
+        assert!(grammar.contains(r#"\"end_time\":"#));
+        assert!(grammar.contains(r#"\"is_all_day\":"#));
+        assert!(grammar.contains(r#"\"location\":"#));
+        assert!(grammar.contains(r#"\"description\":"#));
+    }
+
+    #[tokio::test]
+    async fn test_inference_manager_lifecycle() {
+        let manager = InferenceEngineManager::new();
+        assert!(!manager.is_model_loaded("smollm2-360m-instruct-q4_k_m").await);
+        manager.unload_model().await;
+        assert!(!manager.is_model_loaded("smollm2-360m-instruct-q4_k_m").await);
+    }
+}

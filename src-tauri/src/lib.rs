@@ -1,4 +1,5 @@
 pub mod calendar;
+pub mod inference;
 pub mod model;
 pub mod ocr;
 pub mod parser;
@@ -31,12 +32,14 @@ fn extract_text_from_image_bytes(bytes: Vec<u8>) -> Result<OcrResult, String> {
     extract_text_from_bytes(&bytes)
 }
 
-#[tauri::command]
-fn parse_event_from_text(
-    text: String,
+pub async fn parse_event_internal(
+    app: Option<&tauri::AppHandle>,
+    text: &str,
     reference_time: Option<String>,
     timezone_offset_minutes: Option<i32>,
-) -> Result<EventDetails, String> {
+    model_id: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> EventDetails {
     let context = if reference_time.is_some() || timezone_offset_minutes.is_some() {
         ReferenceContext {
             reference_time,
@@ -46,27 +49,86 @@ fn parse_event_from_text(
         ReferenceContext::now()
     };
 
-    Ok(parse_event_deterministic(&text, &context))
+    if let Some(app_handle) = app {
+        inference::extract_event_orchestrated(
+            app_handle,
+            text,
+            &context,
+            model_id,
+            timeout_secs,
+        ).await
+    } else {
+        parse_event_deterministic(text, &context)
+    }
 }
 
 #[tauri::command]
-fn extract_event_from_image(
+async fn parse_event_from_text(
+    app: tauri::AppHandle,
+    text: String,
+    reference_time: Option<String>,
+    timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<EventDetails, String> {
+    Ok(parse_event_internal(
+        Some(&app),
+        &text,
+        reference_time,
+        timezone_offset_minutes,
+        model_id.as_deref(),
+        timeout_secs,
+    ).await)
+}
+
+#[tauri::command]
+async fn extract_event_from_image(
+    app: tauri::AppHandle,
     path: String,
     reference_time: Option<String>,
     timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> Result<EventDetails, String> {
     let ocr_res = extract_text_from_path(&path)?;
-    parse_event_from_text(ocr_res.text, reference_time, timezone_offset_minutes)
+    Ok(parse_event_internal(
+        Some(&app),
+        &ocr_res.text,
+        reference_time,
+        timezone_offset_minutes,
+        model_id.as_deref(),
+        timeout_secs,
+    ).await)
 }
 
 #[tauri::command]
-fn extract_event_from_image_bytes(
+async fn extract_event_from_image_bytes(
+    app: tauri::AppHandle,
     bytes: Vec<u8>,
     reference_time: Option<String>,
     timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> Result<EventDetails, String> {
     let ocr_res = extract_text_from_bytes(&bytes)?;
-    parse_event_from_text(ocr_res.text, reference_time, timezone_offset_minutes)
+    Ok(parse_event_internal(
+        Some(&app),
+        &ocr_res.text,
+        reference_time,
+        timezone_offset_minutes,
+        model_id.as_deref(),
+        timeout_secs,
+    ).await)
+}
+#[tauri::command]
+async fn unload_inference_model() -> Result<(), String> {
+    inference::InferenceEngineManager::global().unload_model().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_inference_model_loaded(model_id: String) -> Result<bool, String> {
+    Ok(inference::InferenceEngineManager::global().is_model_loaded(&model_id).await)
 }
 
 #[tauri::command]
@@ -151,13 +213,17 @@ fn cancel_model_download(app: tauri::AppHandle, model_id: String) -> Result<(), 
 }
 
 #[tauri::command]
-fn delete_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
-    model::delete_model_file(&app, &model_id)
+async fn delete_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || model::delete_model_file(&app, &model_id))
+        .await
+        .map_err(|e| format!("Delete task failed: {}", e))?
 }
 
 #[tauri::command]
-fn verify_model_hash(app: tauri::AppHandle, model_id: String) -> Result<bool, String> {
-    model::verify_model(&app, &model_id)
+async fn verify_model_hash(app: tauri::AppHandle, model_id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || model::verify_model(&app, &model_id))
+        .await
+        .map_err(|e| format!("Verification task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -193,7 +259,9 @@ pub fn run() {
             cancel_model_download,
             delete_model,
             verify_model_hash,
-            get_models_storage_info
+            get_models_storage_info,
+            unload_inference_model,
+            is_inference_model_loaded,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -209,17 +277,21 @@ mod tests {
         manifest_dir.parent().unwrap().join("samples").join(filename)
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    fn test_extract_event_from_sample_image() {
+    async fn test_extract_event_from_sample_image() {
         let sample = get_sample_path("gilman_flyer.png");
-        let event = extract_event_from_image(
-            sample.to_str().unwrap().to_string(),
+        let ocr_res = extract_text_from_path(sample.to_str().unwrap())
+            .expect("Should run OCR on sample flyer");
+        let event = parse_event_internal(
+            None,
+            &ocr_res.text,
             Some("2026-09-06T12:00:00-04:00".to_string()),
             Some(-240),
+            None,
+            None,
         )
-        .expect("Should extract event from image");
-
+        .await;
         assert!(event.title.contains("GILMAN SQUARE") || event.title.contains("FESTIVAL"));
         assert!(event.start_time.is_some());
         assert!(event.start_time.unwrap().starts_with("2026-09-12T12:00:00"));
