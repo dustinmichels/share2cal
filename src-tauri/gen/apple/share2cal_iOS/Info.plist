@@ -37,6 +37,14 @@
 	<string>Share2Cal uses your calendar to save events created from scanned images.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Share2Cal needs write access to save events directly to your calendar.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Share2Cal uses your camera to capture photos of event flyers, invitations, and schedules.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Share2Cal needs access to your photo library to select flyer images and screenshots.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Share2Cal needs permission to save images to your photo library.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Share2Cal uses the camera to capture images of event flyers.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Share2Cal needs local network access to connect to the development server.</string>
 	<key>LSRequiresIPhoneOS</key>

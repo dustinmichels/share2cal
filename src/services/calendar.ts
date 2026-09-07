@@ -18,7 +18,12 @@ export interface CalendarResult {
 function getErrorMessage(err: unknown): string {
   if (typeof err === "string") return err;
   if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
+  if (
+    err &&
+    typeof err === "object" &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
     return (err as { message: string }).message;
   }
   return "Unknown calendar error";
@@ -69,7 +74,8 @@ export async function addEventToNativeCalendar(event: EventDetails): Promise<Cal
     if (status === "denied" || status === "restricted") {
       return {
         success: false,
-        error: "Calendar access is denied. Please enable Calendar access for Share2Cal in your device Settings.",
+        error:
+          "Calendar access is denied. Please enable Calendar access for Share2Cal in your device Settings.",
       };
     }
 

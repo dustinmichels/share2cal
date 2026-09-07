@@ -14,7 +14,9 @@ export interface SharedImagePayload {
  * Checks if there is any pending shared image waiting from the iOS Share Extension
  * or system share mechanism.
  */
-export async function getPendingSharedImage(includeBytes = true): Promise<SharedImagePayload | null> {
+export async function getPendingSharedImage(
+  includeBytes = true,
+): Promise<SharedImagePayload | null> {
   try {
     return await invoke<SharedImagePayload | null>("get_pending_shared_image", {
       includeBytes,
@@ -42,7 +44,7 @@ export async function clearPendingSharedImage(): Promise<void> {
 export async function stageSharedImage(
   bytes: Uint8Array | number[],
   fileName: string,
-  mimeType?: string
+  mimeType?: string,
 ): Promise<SharedImagePayload> {
   const payloadBytes = bytes instanceof Uint8Array ? Array.from(bytes) : bytes;
   return await invoke<SharedImagePayload>("stage_shared_image", {

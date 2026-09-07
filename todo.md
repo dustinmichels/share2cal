@@ -9,6 +9,7 @@
 - [x] **Direct Weight Distribution via Hugging Face Hub LFS**:
   - Direct downloads via Hugging Face Hub LFS resolve endpoints (HTTP Range supported for resume/pause; no custom Cloudflare R2 / S3 infra needed).
   - Created `model-manifest.json` with model IDs, verified SHA-256 checksums, byte counts, and direct Hugging Face URLs.
+
 ---
 
 ## 2. On-Device Storage & Download Manager

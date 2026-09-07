@@ -13,7 +13,10 @@ export interface EventDetails {
   source: string;
 }
 
-export function getCurrentReferenceTime(): { referenceTime: string; timezoneOffsetMinutes: number } {
+export function getCurrentReferenceTime(): {
+  referenceTime: string;
+  timezoneOffsetMinutes: number;
+} {
   const now = new Date();
   const timezoneOffsetMinutes = -now.getTimezoneOffset(); // e.g. -240 for EDT
   return {
@@ -25,7 +28,7 @@ export function getCurrentReferenceTime(): { referenceTime: string; timezoneOffs
 export async function parseEventFromText(
   text: string,
   referenceTime?: string,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails>("parse_event_from_text", {
@@ -38,7 +41,7 @@ export async function parseEventFromText(
 export async function extractEventFromImage(
   path: string,
   referenceTime?: string,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails>("extract_event_from_image", {
@@ -51,7 +54,7 @@ export async function extractEventFromImage(
 export async function extractEventFromImageBytes(
   bytes: Uint8Array | number[],
   referenceTime?: string,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
 ): Promise<EventDetails> {
   const ref = getCurrentReferenceTime();
   const payload = bytes instanceof Uint8Array ? Array.from(bytes) : bytes;
@@ -73,7 +76,7 @@ export async function getEventGbnfGrammar(): Promise<string> {
 export async function generateEventPrompt(
   text: string,
   referenceTime?: string,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
 ): Promise<string> {
   const ref = getCurrentReferenceTime();
   return await invoke<string>("generate_event_prompt", {
@@ -169,12 +172,16 @@ export function generateIcsCalendarContent(event: EventDetails): string {
     const startStr = formatIcsDateOnly(startDate);
     dtStart = `DTSTART;VALUE=DATE:${startStr}`;
 
-    const endDate = event.end_time ? new Date(event.end_time) : new Date(startDate.getTime() + 86400000);
+    const endDate = event.end_time
+      ? new Date(event.end_time)
+      : new Date(startDate.getTime() + 86400000);
     const endStr = formatIcsDateOnly(endDate);
     dtEnd = `DTEND;VALUE=DATE:${endStr}`;
   } else {
     const startDate = event.start_time ? new Date(event.start_time) : now;
-    const endDate = event.end_time ? new Date(event.end_time) : new Date(startDate.getTime() + 3600000);
+    const endDate = event.end_time
+      ? new Date(event.end_time)
+      : new Date(startDate.getTime() + 3600000);
     dtStart = `DTSTART:${formatIcsDate(startDate)}`;
     dtEnd = `DTEND:${formatIcsDate(endDate)}`;
   }
@@ -182,7 +189,9 @@ export function generateIcsCalendarContent(event: EventDetails): string {
   const uid = `share2cal-${Date.now()}-${Math.random().toString(36).substring(2, 9)}@share2cal.app`;
   const summary = escapeIcsText(event.title || "New Event");
   const location = event.location ? `LOCATION:${escapeIcsText(event.location)}\r\n` : "";
-  const description = event.description ? `DESCRIPTION:${escapeIcsText(event.description)}\r\n` : "";
+  const description = event.description
+    ? `DESCRIPTION:${escapeIcsText(event.description)}\r\n`
+    : "";
 
   return [
     "BEGIN:VCALENDAR",

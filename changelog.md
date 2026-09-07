@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-07
 
 ### Added
+
 - **Hugging Face Model Direct Distribution (`model-manifest.json`)**: Configured direct LFS resolve URLs, exact file sizes, and SHA-256 hashes for `SmolLM2-360M-Instruct` (default, Q4_K_M, ~270 MB), `SmolLM2-135M-Instruct` (Q4_K_M, ~105 MB), and `Qwen2.5-0.5B-Instruct` (Q4_K_M, ~491 MB).
 - **On-Device Model Manager (`src-tauri/src/model.rs`)**:
   - Sandboxed persistent storage resolution in app data directory (`models/`).
@@ -21,4 +22,5 @@
 - **Header & Empty State Integrations (`src/App.vue`)**: Added header model readiness status pill and empty-state on-device model card linking to settings modal.
 
 ### Changed
+
 - **`todo.md`**: Updated Section 1 architecture to use direct Hugging Face endpoints instead of custom Cloudflare R2 / S3 infrastructure.

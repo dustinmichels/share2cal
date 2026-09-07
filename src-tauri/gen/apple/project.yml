@@ -66,6 +66,10 @@ targets:
               - share2cal
         NSCalendarsUsageDescription: "Share2Cal uses your calendar to save events created from scanned images."
         NSCalendarsWriteOnlyAccessUsageDescription: "Share2Cal needs write access to save events directly to your calendar."
+        NSCameraUsageDescription: "Share2Cal uses your camera to capture photos of event flyers, invitations, and schedules."
+        NSPhotoLibraryUsageDescription: "Share2Cal needs access to your photo library to select flyer images and screenshots."
+        NSPhotoLibraryAddUsageDescription: "Share2Cal needs permission to save images to your photo library."
+        NSMicrophoneUsageDescription: "Share2Cal uses the camera to capture images of event flyers."
         NSLocalNetworkUsageDescription: "Share2Cal needs local network access to connect to the development server."
     entitlements:
       path: share2cal_iOS/share2cal_iOS.entitlements
@@ -81,7 +85,7 @@ targets:
         ENABLE_BITCODE: false
         ENABLE_USER_SCRIPT_SANDBOXING: false
         ARCHS: [arm64]
-        VALID_ARCHS: arm64 
+        VALID_ARCHS: arm64
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
         LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true

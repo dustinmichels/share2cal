@@ -84,7 +84,8 @@ const DEFAULT_FALLBACK_MODELS: ModelStatus[] = [
     is_verified: false,
     error: null,
     quantization: "Q4_K_M",
-    description: "Recommended. Balanced 360M model offering fast inference, low RAM consumption, and reliable structured event extraction.",
+    description:
+      "Recommended. Balanced 360M model offering fast inference, low RAM consumption, and reliable structured event extraction.",
     recommended_ram: "< 300 MB",
     is_default: true,
   },
@@ -102,7 +103,8 @@ const DEFAULT_FALLBACK_MODELS: ModelStatus[] = [
     is_verified: false,
     error: null,
     quantization: "Q4_K_M",
-    description: "Ultra-lightweight 135M model with minimal storage footprint. Recommended for older devices or tight storage.",
+    description:
+      "Ultra-lightweight 135M model with minimal storage footprint. Recommended for older devices or tight storage.",
     recommended_ram: "< 150 MB",
     is_default: false,
   },
@@ -120,7 +122,8 @@ const DEFAULT_FALLBACK_MODELS: ModelStatus[] = [
     is_verified: false,
     error: null,
     quantization: "Q4_K_M",
-    description: "High-accuracy 0.5B model with strong multilingual comprehension and complex flyer layout parsing.",
+    description:
+      "High-accuracy 0.5B model with strong multilingual comprehension and complex flyer layout parsing.",
     recommended_ram: "< 550 MB",
     is_default: false,
   },
@@ -189,8 +192,10 @@ export async function getModelsStorageInfo(): Promise<ModelsStorageInfo | null> 
     console.warn("Using fallback models storage info:", err);
     return {
       storage_dir: "/var/mobile/Containers/Data/Application/Share2Cal/models",
-      total_models_downloaded: browserMockModels.filter(m => m.is_downloaded).length,
-      total_models_size_bytes: browserMockModels.filter(m => m.is_downloaded).reduce((sum, m) => sum + m.size_bytes, 0),
+      total_models_downloaded: browserMockModels.filter((m) => m.is_downloaded).length,
+      total_models_size_bytes: browserMockModels
+        .filter((m) => m.is_downloaded)
+        .reduce((sum, m) => sum + m.size_bytes, 0),
       free_disk_space_bytes: 18450000000,
     };
   }
@@ -200,7 +205,7 @@ export async function getModelsStorageInfo(): Promise<ModelsStorageInfo | null> 
  * Subscribes to model download progress events emitted by the native Rust backend.
  */
 export async function onModelDownloadProgress(
-  callback: (payload: DownloadProgressPayload) => void
+  callback: (payload: DownloadProgressPayload) => void,
 ): Promise<UnlistenFn> {
   return await listen<DownloadProgressPayload>("model_download_progress", (event) => {
     callback(event.payload);

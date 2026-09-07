@@ -53,10 +53,7 @@ async function loadData() {
   isLoading.value = true;
   actionError.value = null;
   try {
-    const [statuses, info] = await Promise.all([
-      getModelStatuses(),
-      getModelsStorageInfo(),
-    ]);
+    const [statuses, info] = await Promise.all([getModelStatuses(), getModelsStorageInfo()]);
     models.value = statuses;
     storageInfo.value = info;
   } catch (err) {
@@ -70,11 +67,9 @@ onMounted(async () => {
   await loadData();
 
   try {
-    unlistenProgress = await onModelDownloadProgress(
-      (payload: DownloadProgressPayload) => {
-        handleProgress(payload);
-      }
-    );
+    unlistenProgress = await onModelDownloadProgress((payload: DownloadProgressPayload) => {
+      handleProgress(payload);
+    });
   } catch (err) {
     console.warn("Could not register model download progress listener:", err);
   }
@@ -177,8 +172,7 @@ async function handleVerify(modelId: string) {
     if (isValid) {
       actionSuccess.value = "SHA-256 integrity check passed. Model is intact.";
     } else {
-      actionError.value =
-        "SHA-256 integrity check failed. Consider re-downloading.";
+      actionError.value = "SHA-256 integrity check failed. Consider re-downloading.";
     }
     await loadData();
   } catch (err) {
@@ -215,12 +209,7 @@ function setMode(mode: ParsingMode) {
   <div class="settings-page">
     <!-- Top Navigation Header -->
     <header class="settings-nav-bar">
-      <button
-        type="button"
-        class="btn-back"
-        @click="emit('back')"
-        aria-label="Back to Scanner"
-      >
+      <button type="button" class="btn-back" @click="emit('back')" aria-label="Back to Scanner">
         <svg
           class="nav-arrow-icon"
           viewBox="0 0 24 24"
@@ -254,12 +243,7 @@ function setMode(mode: ParsingMode) {
         <polyline points="20 6 9 17 4 12"></polyline>
       </svg>
       <span class="banner-text">{{ actionSuccess }}</span>
-      <button
-        type="button"
-        class="banner-close"
-        @click="actionSuccess = null"
-        aria-label="Close"
-      >
+      <button type="button" class="banner-close" @click="actionSuccess = null" aria-label="Close">
         ✕
       </button>
     </div>
@@ -277,12 +261,7 @@ function setMode(mode: ParsingMode) {
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <span class="banner-text">{{ actionError }}</span>
-      <button
-        type="button"
-        class="banner-close"
-        @click="actionError = null"
-        aria-label="Close"
-      >
+      <button type="button" class="banner-close" @click="actionError = null" aria-label="Close">
         ✕
       </button>
     </div>
@@ -307,9 +286,7 @@ function setMode(mode: ParsingMode) {
           </div>
           <div>
             <h2 class="section-heading">Text Parsing</h2>
-            <p class="section-subheading">
-              Select your extraction engine preference
-            </p>
+            <p class="section-subheading">Select your extraction engine preference</p>
           </div>
         </div>
       </div>
@@ -373,10 +350,7 @@ function setMode(mode: ParsingMode) {
           <span class="mode-badge">
             {{ parsingMode === "enhanced" ? "Enhanced Mode" : "Simple Mode" }}
           </span>
-          <span
-            v-if="parsingMode === 'enhanced' && readyModelCount > 0"
-            class="ready-tag"
-          >
+          <span v-if="parsingMode === 'enhanced' && readyModelCount > 0" class="ready-tag">
             ✓ Model Ready
           </span>
         </div>
@@ -491,8 +465,7 @@ function setMode(mode: ParsingMode) {
             class="surface-card model-option-card"
             :class="{
               'card-is-ready': model.is_downloaded,
-              'card-is-downloading':
-                model.is_downloading || activeDownloads[model.id],
+              'card-is-downloading': model.is_downloading || activeDownloads[model.id],
             }"
           >
             <!-- Header with Title, Quantization, and Status -->
@@ -501,19 +474,14 @@ function setMode(mode: ParsingMode) {
                 <div class="model-title-wrap">
                   <h4 class="model-name">{{ model.name }}</h4>
                   <span class="quant-badge">{{ model.quantization }}</span>
-                  <span v-if="model.is_default" class="badge-rec">
-                    Recommended
-                  </span>
+                  <span v-if="model.is_default" class="badge-rec"> Recommended </span>
                 </div>
                 <p class="model-desc">{{ model.description }}</p>
               </div>
 
               <!-- Status Badge -->
               <div class="model-status-col">
-                <span
-                  v-if="model.is_downloaded"
-                  class="status-pill status-ready"
-                >
+                <span v-if="model.is_downloaded" class="status-pill status-ready">
                   <svg
                     viewBox="0 0 24 24"
                     fill="none"
@@ -588,7 +556,7 @@ function setMode(mode: ParsingMode) {
                   :style="{
                     width: `${Math.min(
                       Math.max(activeDownloads[model.id]?.progress || 0, 0),
-                      100
+                      100,
                     )}%`,
                   }"
                 ></div>
@@ -596,12 +564,7 @@ function setMode(mode: ParsingMode) {
 
               <div class="progress-stats-line">
                 <span>
-                  {{
-                    formatBytes(
-                      activeDownloads[model.id]?.received ||
-                        model.downloaded_bytes
-                    )
-                  }}
+                  {{ formatBytes(activeDownloads[model.id]?.received || model.downloaded_bytes) }}
                   / {{ formatBytes(model.size_bytes) }}
                 </span>
                 <span v-if="activeDownloads[model.id]?.speed">
@@ -613,9 +576,7 @@ function setMode(mode: ParsingMode) {
             <!-- Action Buttons (Mobile Friendly Full Width) -->
             <div class="model-actions-wrap">
               <!-- Case 1: Downloading -> Cancel -->
-              <template
-                v-if="model.is_downloading || activeDownloads[model.id]"
-              >
+              <template v-if="model.is_downloading || activeDownloads[model.id]">
                 <button
                   type="button"
                   class="btn-model-action btn-model-cancel"
@@ -673,14 +634,10 @@ function setMode(mode: ParsingMode) {
                       stroke-width="2"
                       class="btn-action-icon"
                     >
-                      <path
-                        d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
-                      ></path>
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                     </svg>
                     <span>{{
-                      verifyingModelId === model.id
-                        ? "Verifying..."
-                        : "Verify Checksum"
+                      verifyingModelId === model.id ? "Verifying..." : "Verify Checksum"
                     }}</span>
                   </button>
 
@@ -702,11 +659,7 @@ function setMode(mode: ParsingMode) {
                         d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
                       ></path>
                     </svg>
-                    <span>{{
-                      deletingModelId === model.id
-                        ? "Deleting..."
-                        : "Delete"
-                    }}</span>
+                    <span>{{ deletingModelId === model.id ? "Deleting..." : "Delete" }}</span>
                   </button>
                 </div>
               </template>
@@ -719,7 +672,8 @@ function setMode(mode: ParsingMode) {
     <!-- Bottom Safety Note -->
     <footer class="settings-footer">
       <p class="footer-hint">
-        Share2Cal operates 100% on your device. Your flyers and calendar entries are never transmitted to any external server.
+        Share2Cal operates 100% on your device. Your flyers and calendar entries are never
+        transmitted to any external server.
       </p>
     </footer>
   </div>
@@ -926,7 +880,9 @@ function setMode(mode: ParsingMode) {
 .toggle-btn.is-active {
   background: var(--bg-card);
   color: var(--accent-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .toggle-icon {
@@ -1534,7 +1490,8 @@ function setMode(mode: ParsingMode) {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }

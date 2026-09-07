@@ -32,18 +32,10 @@
       "icons/icon.ico"
     ],
     "iOS": {
-      "frameworks": [
-        "Vision.framework",
-        "ImageIO.framework",
-        "EventKit.framework"
-      ]
+      "frameworks": ["Vision.framework", "ImageIO.framework", "EventKit.framework"]
     },
     "macOS": {
-      "frameworks": [
-        "Vision",
-        "ImageIO",
-        "EventKit"
-      ]
+      "frameworks": ["Vision", "ImageIO", "EventKit"]
     }
   }
 }

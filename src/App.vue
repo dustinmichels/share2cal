@@ -10,18 +10,10 @@ import {
   buildIsoFromDateTime,
   type EventDetails,
 } from "./services/event";
-import {
-  getPendingSharedImage,
-  clearPendingSharedImage,
-  payloadToFile,
-} from "./services/share";
+import { getPendingSharedImage, clearPendingSharedImage, payloadToFile } from "./services/share";
 import SettingsView from "./components/SettingsView.vue";
 import { getModelStatuses, type ModelStatus } from "./services/model";
-import {
-  getStoredParsingMode,
-  setStoredParsingMode,
-  type ParsingMode,
-} from "./services/settings";
+import { getStoredParsingMode, setStoredParsingMode, type ParsingMode } from "./services/settings";
 
 const currentView = ref<"main" | "settings">("main");
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
@@ -32,7 +24,11 @@ function updateParsingMode(mode: ParsingMode) {
 }
 const modelStatuses = ref<ModelStatus[]>([]);
 const hasLocalModel = computed(() => modelStatuses.value.some((m) => m.is_downloaded));
-const defaultModel = computed(() => modelStatuses.value.find((m) => m.is_downloaded) || modelStatuses.value.find((m) => m.is_default));
+const defaultModel = computed(
+  () =>
+    modelStatuses.value.find((m) => m.is_downloaded) ||
+    modelStatuses.value.find((m) => m.is_default),
+);
 const defaultModelName = computed(() => defaultModel.value?.name || null);
 
 async function refreshModelStatus() {
@@ -114,12 +110,27 @@ const eventConfidencePercent = computed(() => {
   return Math.round(eventDetails.value.confidence * 100);
 });
 
+function isImageFile(file: File): boolean {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  if (file.name && file.name.match(/\.(heic|heif|png|jpe?g|webp|bmp|gif|tiff?)$/i)) return true;
+  if (!file.type || file.type === "application/octet-stream") {
+    if (
+      file.name &&
+      file.name.match(/\.(pdf|txt|json|doc|docx|csv|zip|gz|tar|mp3|mp4|mov|avi)$/i)
+    ) {
+      return false;
+    }
+    return file.size > 0;
+  }
+  return false;
+}
+
 function setImageFile(file: File) {
-  if (!file.type.startsWith("image/") && !file.name.match(/\.(heic|heif|png|jpe?g|webp|bmp|gif)$/i)) {
+  if (!isImageFile(file)) {
     errorMessage.value = "Please select a valid image file (PNG, JPEG, HEIF, WebP, etc.).";
     return;
   }
-
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value);
   }
@@ -205,7 +216,8 @@ async function handleGo() {
     ocrResult.value = res;
 
     if (!res.text.trim()) {
-      errorMessage.value = "No text was detected in this image. Try another photo with clearer text.";
+      errorMessage.value =
+        "No text was detected in this image. Try another photo with clearer text.";
       eventDetails.value = null;
     } else {
       // Parse event details from the extracted OCR text
@@ -213,7 +225,8 @@ async function handleGo() {
       eventDetails.value = parsed;
     }
   } catch (err: any) {
-    errorMessage.value = err?.toString() || "Failed to process OCR and event extraction on the selected image.";
+    errorMessage.value =
+      err?.toString() || "Failed to process OCR and event extraction on the selected image.";
   } finally {
     isProcessing.value = false;
   }
@@ -392,7 +405,15 @@ onUnmounted(() => {
       <!-- App Header -->
       <header v-if="currentView === 'main'" class="app-header">
         <div class="logo-badge">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="logo-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
             <line x1="16" y1="2" x2="16" y2="6"></line>
             <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -411,20 +432,43 @@ onUnmounted(() => {
       <!-- Share Notification Banner -->
       <div v-if="shareNotification" class="toast-banner toast-info">
         <div class="toast-icon-wrap">
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
             <polyline points="16 6 12 2 8 6"></polyline>
             <line x1="12" y1="2" x2="12" y2="15"></line>
           </svg>
         </div>
         <span class="toast-text">{{ shareNotification }}</span>
-        <button type="button" class="btn-toast-close" @click="shareNotification = null" aria-label="Close notification">✕</button>
+        <button
+          type="button"
+          class="btn-toast-close"
+          @click="shareNotification = null"
+          aria-label="Close notification"
+        >
+          ✕
+        </button>
       </div>
 
       <!-- Native Calendar Success Toast -->
       <div v-if="calendarSuccessMessage" class="toast-banner toast-success">
         <div class="toast-icon-wrap">
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
         </div>
@@ -432,13 +476,28 @@ onUnmounted(() => {
           <span class="toast-heading">Added to Calendar</span>
           <span class="toast-text">{{ calendarSuccessMessage }}</span>
         </div>
-        <button type="button" class="btn-toast-close" @click="calendarSuccessMessage = null" aria-label="Close">✕</button>
+        <button
+          type="button"
+          class="btn-toast-close"
+          @click="calendarSuccessMessage = null"
+          aria-label="Close"
+        >
+          ✕
+        </button>
       </div>
 
       <!-- Calendar Warning / Fallback Toast -->
       <div v-if="calendarErrorMessage" class="toast-banner toast-warning">
         <div class="toast-icon-wrap">
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -448,13 +507,28 @@ onUnmounted(() => {
           <span class="toast-heading">Calendar Notice</span>
           <span class="toast-text">{{ calendarErrorMessage }} (.ics exported)</span>
         </div>
-        <button type="button" class="btn-toast-close" @click="calendarErrorMessage = null" aria-label="Close">✕</button>
+        <button
+          type="button"
+          class="btn-toast-close"
+          @click="calendarErrorMessage = null"
+          aria-label="Close"
+        >
+          ✕
+        </button>
       </div>
 
       <!-- ICS Export Success Toast -->
       <div v-if="calendarDownloaded" class="toast-banner toast-success">
         <div class="toast-icon-wrap">
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -462,15 +536,32 @@ onUnmounted(() => {
         </div>
         <div class="toast-body">
           <span class="toast-heading">Calendar File (.ics) Exported</span>
-          <span class="toast-text">Open the downloaded file to add to Apple Calendar, Google, or Outlook.</span>
+          <span class="toast-text"
+            >Open the downloaded file to add to Apple Calendar, Google, or Outlook.</span
+          >
         </div>
-        <button type="button" class="btn-toast-close" @click="calendarDownloaded = false" aria-label="Close">✕</button>
+        <button
+          type="button"
+          class="btn-toast-close"
+          @click="calendarDownloaded = false"
+          aria-label="Close"
+        >
+          ✕
+        </button>
       </div>
 
       <!-- General Error Toast -->
       <div v-if="errorMessage" class="toast-banner toast-error">
         <div class="toast-icon-wrap">
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -480,14 +571,21 @@ onUnmounted(() => {
           <span class="toast-heading">Processing Notice</span>
           <span class="toast-text">{{ errorMessage }}</span>
         </div>
-        <button type="button" class="btn-toast-close" @click="errorMessage = null" aria-label="Close">✕</button>
+        <button
+          type="button"
+          class="btn-toast-close"
+          @click="errorMessage = null"
+          aria-label="Close"
+        >
+          ✕
+        </button>
       </div>
 
       <!-- Hidden file inputs -->
       <input
         ref="fileInputRef"
         type="file"
-        accept="image/*,.heic,.heif"
+        accept="image/*,.heic,.heif,.png,.jpg,.jpeg,.webp,.tiff"
         class="hidden-input"
         @change="handleFileInput"
       />
@@ -513,19 +611,37 @@ onUnmounted(() => {
           >
             <div class="upload-hero">
               <div class="upload-icon-bubble">
-                <svg class="upload-bubble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg
+                  class="upload-bubble-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
                   <circle cx="8.5" cy="8.5" r="1.5"></circle>
                   <polyline points="21 15 16 10 5 21"></polyline>
                 </svg>
               </div>
               <h2 class="upload-title">Add Flyer or Screenshot</h2>
-              <p class="upload-subtitle">Choose a photo or snap a picture of an event flyer, invite, or schedule.</p>
+              <p class="upload-subtitle">
+                Choose a photo or snap a picture of an event flyer, invite, or schedule.
+              </p>
             </div>
 
             <div class="upload-actions">
               <button type="button" class="btn-touch btn-touch-primary" @click="triggerFileUpload">
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <svg
+                  class="btn-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="17 8 12 3 7 8"></polyline>
                   <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -533,9 +649,23 @@ onUnmounted(() => {
                 <span>Choose from Library</span>
               </button>
 
-              <button type="button" class="btn-touch btn-touch-secondary" @click="triggerCameraCapture">
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <button
+                type="button"
+                class="btn-touch btn-touch-secondary"
+                @click="triggerCameraCapture"
+              >
+                <svg
+                  class="btn-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+                  ></path>
                   <circle cx="12" cy="13" r="4"></circle>
                 </svg>
                 <span>Take Photo</span>
@@ -547,367 +677,493 @@ onUnmounted(() => {
             </div>
           </section>
         </div>
-      <!-- STATE 2: Image Selected & Event Extracted State -->
-      <section v-else class="content-flow">
-        <!-- Hero Preview & Scanner Card -->
-        <div class="surface-card preview-card">
-          <div class="preview-top-bar">
-            <div class="preview-meta">
-              <span class="preview-file-name" :title="selectedFile.name">{{ selectedFile.name }}</span>
-              <div class="preview-chips">
-                <span class="chip-size">{{ formatFileSize(selectedFile.size) }}</span>
-                <span v-if="isFromShareExtension" class="chip-share">
-                  <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                    <polyline points="16 6 12 2 8 6"></polyline>
-                    <line x1="12" y1="2" x2="12" y2="15"></line>
-                  </svg>
-                  iOS Share
-                </span>
+        <!-- STATE 2: Image Selected & Event Extracted State -->
+        <section v-else class="content-flow">
+          <!-- Hero Preview & Scanner Card -->
+          <div class="surface-card preview-card">
+            <div class="preview-top-bar">
+              <div class="preview-meta">
+                <span class="preview-file-name" :title="selectedFile.name">{{
+                  selectedFile.name
+                }}</span>
+                <div class="preview-chips">
+                  <span class="chip-size">{{ formatFileSize(selectedFile.size) }}</span>
+                  <span v-if="isFromShareExtension" class="chip-share">
+                    <svg
+                      class="chip-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                      <polyline points="16 6 12 2 8 6"></polyline>
+                      <line x1="12" y1="2" x2="12" y2="15"></line>
+                    </svg>
+                    iOS Share
+                  </span>
+                </div>
               </div>
-            </div>
 
-            <button type="button" class="btn-pill-danger" :disabled="isProcessing" @click="handleReset" aria-label="Remove photo">
-              <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-              <span>Remove</span>
-            </button>
-          </div>
-
-          <div class="image-stage">
-            <img v-if="previewUrl" :src="previewUrl" alt="Selected flyer preview" class="stage-img" />
-          </div>
-
-          <div class="scanner-action-wrap">
-            <button
-              type="button"
-              class="btn-touch btn-touch-scan"
-              :class="{ 'is-loading': isProcessing }"
-              :disabled="isProcessing"
-              @click="handleGo"
-            >
-              <template v-if="!isProcessing">
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              <button
+                type="button"
+                class="btn-pill-danger"
+                :disabled="isProcessing"
+                @click="handleReset"
+                aria-label="Remove photo"
+              >
+                <svg
+                  class="btn-icon-xs"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                  ></path>
                 </svg>
-                <span>{{ eventDetails ? 'Re-scan & Extract' : 'Scan Flyer & Extract Event' }}</span>
-              </template>
-              <template v-else>
-                <div class="spinner-circle"></div>
-                <span>Scanning Flyer...</span>
-              </template>
-            </button>
-
-            <div class="quick-switch-bar">
-              <button type="button" class="btn-subtle-link" :disabled="isProcessing" @click="triggerFileUpload">
-                Choose another photo
-              </button>
-              <span class="quick-dot">•</span>
-              <button type="button" class="btn-subtle-link" :disabled="isProcessing" @click="triggerCameraCapture">
-                Take new photo
+                <span>Remove</span>
               </button>
             </div>
-          </div>
-        </div>
 
-        <!-- Event Details Form Section -->
-        <div v-if="eventDetails" class="surface-card event-section">
-          <div class="section-header">
-            <div class="section-title-wrap">
-              <div class="section-icon-bubble">
-                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="16" y1="2" x2="16" y2="6"></line>
-                  <line x1="8" y1="2" x2="8" y2="6"></line>
-                  <line x1="3" y1="10" x2="21" y2="10"></line>
-                </svg>
-              </div>
-              <div>
-                <h2 class="section-heading">Event Details</h2>
-                <p class="section-subheading">Review and adjust before adding to calendar</p>
-              </div>
-            </div>
-
-            <div class="confidence-pill-wrap">
-              <span class="badge-pill badge-pill-confidence">{{ eventConfidencePercent }}% match</span>
-            </div>
-          </div>
-
-          <!-- Grouped Form Fields -->
-          <div class="grouped-form">
-            <!-- Event Title Field -->
-            <div class="field-item">
-              <label class="field-label" for="event-title">Title</label>
-              <input
-                id="event-title"
-                v-model="eventForm.title"
-                type="text"
-                class="field-input field-input-bold"
-                placeholder="Event name"
+            <div class="image-stage">
+              <img
+                v-if="previewUrl"
+                :src="previewUrl"
+                alt="Selected flyer preview"
+                class="stage-img"
               />
             </div>
 
-            <!-- Date & All-Day Switch Row -->
-            <div class="field-row">
-              <div class="field-item flex-grow">
-                <label class="field-label" for="event-date">Date</label>
-                <input
-                  id="event-date"
-                  v-model="eventForm.date"
-                  type="date"
-                  class="field-input field-input-date"
-                />
-              </div>
+            <div class="scanner-action-wrap">
+              <button
+                type="button"
+                class="btn-touch btn-touch-scan"
+                :class="{ 'is-loading': isProcessing }"
+                :disabled="isProcessing"
+                @click="handleGo"
+              >
+                <template v-if="!isProcessing">
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span>{{
+                    eventDetails ? "Re-scan & Extract" : "Scan Flyer & Extract Event"
+                  }}</span>
+                </template>
+                <template v-else>
+                  <div class="spinner-circle"></div>
+                  <span>Scanning Flyer...</span>
+                </template>
+              </button>
 
-              <div class="field-item field-item-toggle">
-                <label class="toggle-control" for="event-allday">
-                  <span class="toggle-label-text">All-day</span>
-                  <div class="switch-wrap">
-                    <input
-                      id="event-allday"
-                      v-model="eventForm.isAllDay"
-                      type="checkbox"
-                      class="switch-input"
-                    />
-                    <span class="switch-slider"></span>
-                  </div>
-                </label>
+              <div class="quick-switch-bar">
+                <button
+                  type="button"
+                  class="btn-subtle-link"
+                  :disabled="isProcessing"
+                  @click="triggerFileUpload"
+                >
+                  Choose another photo
+                </button>
+                <span class="quick-dot">•</span>
+                <button
+                  type="button"
+                  class="btn-subtle-link"
+                  :disabled="isProcessing"
+                  @click="triggerCameraCapture"
+                >
+                  Take new photo
+                </button>
               </div>
-            </div>
-
-            <!-- Start / End Time Row (if not all-day) -->
-            <div v-if="!eventForm.isAllDay" class="time-grid">
-              <div class="field-item">
-                <label class="field-label" for="event-start">Starts</label>
-                <input
-                  id="event-start"
-                  v-model="eventForm.startTime"
-                  type="time"
-                  class="field-input field-input-time"
-                />
-              </div>
-
-              <div class="field-item">
-                <label class="field-label" for="event-end">Ends</label>
-                <input
-                  id="event-end"
-                  v-model="eventForm.endTime"
-                  type="time"
-                  class="field-input field-input-time"
-                />
-              </div>
-            </div>
-
-            <!-- Location Field -->
-            <div class="field-item">
-              <label class="field-label" for="event-location">Location</label>
-              <div class="input-icon-shell">
-                <svg class="input-inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                  <circle cx="12" cy="10" r="3"></circle>
-                </svg>
-                <input
-                  id="event-location"
-                  v-model="eventForm.location"
-                  type="text"
-                  class="field-input field-input-with-icon"
-                  placeholder="Venue, address, or link"
-                />
-              </div>
-            </div>
-
-            <!-- Description & Notes Field -->
-            <div class="field-item">
-              <label class="field-label" for="event-description">Notes & Description</label>
-              <textarea
-                id="event-description"
-                v-model="eventForm.description"
-                class="field-textarea"
-                rows="3"
-                placeholder="Performers, details, notes..."
-              ></textarea>
             </div>
           </div>
 
-          <!-- Event Action Cluster -->
-          <div class="event-actions-flow">
+          <!-- Event Details Form Section -->
+          <div v-if="eventDetails" class="surface-card event-section">
+            <div class="section-header">
+              <div class="section-title-wrap">
+                <div class="section-icon-bubble">
+                  <svg
+                    class="section-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="section-heading">Event Details</h2>
+                  <p class="section-subheading">Review and adjust before adding to calendar</p>
+                </div>
+              </div>
+
+              <div class="confidence-pill-wrap">
+                <span class="badge-pill badge-pill-confidence"
+                  >{{ eventConfidencePercent }}% match</span
+                >
+              </div>
+            </div>
+
+            <!-- Grouped Form Fields -->
+            <div class="grouped-form">
+              <!-- Event Title Field -->
+              <div class="field-item">
+                <label class="field-label" for="event-title">Title</label>
+                <input
+                  id="event-title"
+                  v-model="eventForm.title"
+                  type="text"
+                  class="field-input field-input-bold"
+                  placeholder="Event name"
+                />
+              </div>
+
+              <!-- Date & All-Day Switch Row -->
+              <div class="field-row">
+                <div class="field-item flex-grow">
+                  <label class="field-label" for="event-date">Date</label>
+                  <input
+                    id="event-date"
+                    v-model="eventForm.date"
+                    type="date"
+                    class="field-input field-input-date"
+                  />
+                </div>
+
+                <div class="field-item field-item-toggle">
+                  <label class="toggle-control" for="event-allday">
+                    <span class="toggle-label-text">All-day</span>
+                    <div class="switch-wrap">
+                      <input
+                        id="event-allday"
+                        v-model="eventForm.isAllDay"
+                        type="checkbox"
+                        class="switch-input"
+                      />
+                      <span class="switch-slider"></span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Start / End Time Row (if not all-day) -->
+              <div v-if="!eventForm.isAllDay" class="time-grid">
+                <div class="field-item">
+                  <label class="field-label" for="event-start">Starts</label>
+                  <input
+                    id="event-start"
+                    v-model="eventForm.startTime"
+                    type="time"
+                    class="field-input field-input-time"
+                  />
+                </div>
+
+                <div class="field-item">
+                  <label class="field-label" for="event-end">Ends</label>
+                  <input
+                    id="event-end"
+                    v-model="eventForm.endTime"
+                    type="time"
+                    class="field-input field-input-time"
+                  />
+                </div>
+              </div>
+
+              <!-- Location Field -->
+              <div class="field-item">
+                <label class="field-label" for="event-location">Location</label>
+                <div class="input-icon-shell">
+                  <svg
+                    class="input-inline-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                  </svg>
+                  <input
+                    id="event-location"
+                    v-model="eventForm.location"
+                    type="text"
+                    class="field-input field-input-with-icon"
+                    placeholder="Venue, address, or link"
+                  />
+                </div>
+              </div>
+
+              <!-- Description & Notes Field -->
+              <div class="field-item">
+                <label class="field-label" for="event-description">Notes & Description</label>
+                <textarea
+                  id="event-description"
+                  v-model="eventForm.description"
+                  class="field-textarea"
+                  rows="3"
+                  placeholder="Performers, details, notes..."
+                ></textarea>
+              </div>
+            </div>
+
+            <!-- Event Action Cluster -->
+            <div class="event-actions-flow">
+              <button
+                type="button"
+                class="btn-touch btn-touch-calendar"
+                :disabled="isAddingToCalendar"
+                @click="handleAddToCalendar"
+              >
+                <template v-if="isAddingToCalendar">
+                  <div class="spinner-circle spinner-light"></div>
+                  <span>Adding to Calendar...</span>
+                </template>
+                <template v-else>
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="12" y1="11" x2="12" y2="17"></line>
+                    <line x1="9" y1="14" x2="15" y2="14"></line>
+                  </svg>
+                  <span>Add to Calendar</span>
+                </template>
+              </button>
+
+              <div class="secondary-button-row">
+                <button type="button" class="btn-touch btn-touch-outline" @click="handleExportIcs">
+                  <svg
+                    class="btn-icon-sm"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  <span>Export .ics</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="btn-touch btn-touch-outline"
+                  :class="{ 'is-copied': copiedSummary }"
+                  @click="copySummary"
+                >
+                  <template v-if="copiedSummary">
+                    <svg
+                      class="btn-icon-sm"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <span>Copied!</span>
+                  </template>
+                  <template v-else>
+                    <svg
+                      class="btn-icon-sm"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>Copy Summary</span>
+                  </template>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Collapsible Raw OCR Diagnostics Drawer -->
+          <div v-if="ocrResult" class="surface-card ocr-accordion">
             <button
               type="button"
-              class="btn-touch btn-touch-calendar"
-              :disabled="isAddingToCalendar"
-              @click="handleAddToCalendar"
+              class="accordion-trigger"
+              @click="showOcrSection = !showOcrSection"
             >
-              <template v-if="isAddingToCalendar">
-                <div class="spinner-circle spinner-light"></div>
-                <span>Adding to Calendar...</span>
-              </template>
-              <template v-else>
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="16" y1="2" x2="16" y2="6"></line>
-                  <line x1="8" y1="2" x2="8" y2="6"></line>
-                  <line x1="12" y1="11" x2="12" y2="17"></line>
-                  <line x1="9" y1="14" x2="15" y2="14"></line>
-                </svg>
-                <span>Add to Calendar</span>
-              </template>
-            </button>
-
-            <div class="secondary-button-row">
-              <button
-                type="button"
-                class="btn-touch btn-touch-outline"
-                @click="handleExportIcs"
-              >
-                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span>Export .ics</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn-touch btn-touch-outline"
-                :class="{ 'is-copied': copiedSummary }"
-                @click="copySummary"
-              >
-                <template v-if="copiedSummary">
-                  <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  <span>Copied!</span>
-                </template>
-                <template v-else>
-                  <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                  </svg>
-                  <span>Copy Summary</span>
-                </template>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Collapsible Raw OCR Diagnostics Drawer -->
-        <div v-if="ocrResult" class="surface-card ocr-accordion">
-          <button
-            type="button"
-            class="accordion-trigger"
-            @click="showOcrSection = !showOcrSection"
-          >
-            <div class="accordion-title-wrap">
-              <svg class="accordion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="4 7 4 4 20 4 20 7"></polyline>
-                <line x1="9" y1="20" x2="15" y2="20"></line>
-                <line x1="12" y1="4" x2="12" y2="20"></line>
-              </svg>
-              <span class="accordion-title">Extracted OCR Text</span>
-              <span class="chip-count">{{ ocrResult.lines.length }} lines • {{ wordCount }} words • {{ averageConfidence }}% conf</span>
-            </div>
-
-            <svg
-              class="accordion-chevron"
-              :class="{ 'is-open': showOcrSection }"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-
-          <div v-if="showOcrSection" class="accordion-content">
-            <div class="ocr-toolbar">
-              <button
-                type="button"
-                class="btn-subtle-tool"
-                @click="handleReparse"
-              >
-                <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="23 4 23 10 17 10"></polyline>
-                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-                </svg>
-                <span>Re-parse</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn-subtle-tool"
-                :class="{ 'is-copied': copiedOcr }"
-                :disabled="!ocrResult.text.trim()"
-                @click="copyOcrToClipboard"
-              >
-                <template v-if="copiedOcr">
-                  <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  <span>Copied Text</span>
-                </template>
-                <template v-else>
-                  <svg class="btn-icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                  </svg>
-                  <span>Copy OCR</span>
-                </template>
-              </button>
-            </div>
-
-            <textarea
-              readonly
-              class="ocr-raw-display"
-              :value="ocrResult.text"
-              rows="5"
-              placeholder="No text detected."
-            ></textarea>
-
-            <!-- Line Details Toggle -->
-            <div v-if="ocrResult.lines.length > 0" class="line-details-block">
-              <button
-                type="button"
-                class="btn-line-toggle"
-                @click="showLineDetails = !showLineDetails"
-              >
-                <span>{{ showLineDetails ? 'Hide' : 'Show' }} line-by-line confidence</span>
+              <div class="accordion-title-wrap">
                 <svg
-                  class="btn-icon-xs chevron-sm"
-                  :class="{ 'is-rotated': showLineDetails }"
+                  class="accordion-icon"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 >
-                  <polyline points="6 9 12 15 18 9"></polyline>
+                  <polyline points="4 7 4 4 20 4 20 7"></polyline>
+                  <line x1="9" y1="20" x2="15" y2="20"></line>
+                  <line x1="12" y1="4" x2="12" y2="20"></line>
                 </svg>
-              </button>
+                <span class="accordion-title">Extracted OCR Text</span>
+                <span class="chip-count"
+                  >{{ ocrResult.lines.length }} lines • {{ wordCount }} words •
+                  {{ averageConfidence }}% conf</span
+                >
+              </div>
 
-              <div v-if="showLineDetails" class="line-breakdown-list">
-                <div v-for="(line, idx) in ocrResult.lines" :key="idx" class="line-item">
-                  <span class="line-idx">{{ idx + 1 }}</span>
-                  <span class="line-content">{{ line.text }}</span>
-                  <span
-                    class="line-score"
-                    :class="{
-                      'score-high': line.confidence >= 0.8,
-                      'score-med': line.confidence >= 0.5 && line.confidence < 0.8,
-                      'score-low': line.confidence < 0.5
-                    }"
+              <svg
+                class="accordion-chevron"
+                :class="{ 'is-open': showOcrSection }"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <div v-if="showOcrSection" class="accordion-content">
+              <div class="ocr-toolbar">
+                <button type="button" class="btn-subtle-tool" @click="handleReparse">
+                  <svg
+                    class="btn-icon-xs"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   >
-                    {{ Math.round(line.confidence * 100) }}%
-                  </span>
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                  <span>Re-parse</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="btn-subtle-tool"
+                  :class="{ 'is-copied': copiedOcr }"
+                  :disabled="!ocrResult.text.trim()"
+                  @click="copyOcrToClipboard"
+                >
+                  <template v-if="copiedOcr">
+                    <svg
+                      class="btn-icon-xs"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <span>Copied Text</span>
+                  </template>
+                  <template v-else>
+                    <svg
+                      class="btn-icon-xs"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>Copy OCR</span>
+                  </template>
+                </button>
+              </div>
+
+              <textarea
+                readonly
+                class="ocr-raw-display"
+                :value="ocrResult.text"
+                rows="5"
+                placeholder="No text detected."
+              ></textarea>
+
+              <!-- Line Details Toggle -->
+              <div v-if="ocrResult.lines.length > 0" class="line-details-block">
+                <button
+                  type="button"
+                  class="btn-line-toggle"
+                  @click="showLineDetails = !showLineDetails"
+                >
+                  <span>{{ showLineDetails ? "Hide" : "Show" }} line-by-line confidence</span>
+                  <svg
+                    class="btn-icon-xs chevron-sm"
+                    :class="{ 'is-rotated': showLineDetails }"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+
+                <div v-if="showLineDetails" class="line-breakdown-list">
+                  <div v-for="(line, idx) in ocrResult.lines" :key="idx" class="line-item">
+                    <span class="line-idx">{{ idx + 1 }}</span>
+                    <span class="line-content">{{ line.text }}</span>
+                    <span
+                      class="line-score"
+                      :class="{
+                        'score-high': line.confidence >= 0.8,
+                        'score-med': line.confidence >= 0.5 && line.confidence < 0.8,
+                        'score-low': line.confidence < 0.5,
+                      }"
+                    >
+                      {{ Math.round(line.confidence * 100) }}%
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
         </section>
 
         <!-- Prominent Settings Navigation Button (Below Main Image & Action Area) -->
@@ -920,9 +1176,19 @@ onUnmounted(() => {
           >
             <div class="settings-card-left">
               <div class="settings-card-icon-wrap">
-                <svg class="settings-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg
+                  class="settings-card-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <circle cx="12" cy="12" r="3"></circle>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  <path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                  ></path>
                 </svg>
               </div>
               <div class="settings-card-body">
@@ -932,21 +1198,37 @@ onUnmounted(() => {
                     class="settings-badge"
                     :class="parsingMode === 'enhanced' ? 'badge-enhanced' : 'badge-simple'"
                   >
-                    {{ parsingMode === 'enhanced' ? (hasLocalModel ? 'Enhanced (Ready)' : 'Enhanced AI') : 'Simple' }}
+                    {{
+                      parsingMode === "enhanced"
+                        ? hasLocalModel
+                          ? "Enhanced (Ready)"
+                          : "Enhanced AI"
+                        : "Simple"
+                    }}
                   </span>
                 </div>
                 <p class="settings-card-subtitle">
                   {{
-                    parsingMode === 'enhanced'
-                      ? (hasLocalModel ? `${defaultModelName || 'Local AI'} ready on device` : 'Local AI model setup & download')
-                      : 'Using lightweight basic rules'
+                    parsingMode === "enhanced"
+                      ? hasLocalModel
+                        ? `${defaultModelName || "Local AI"} ready on device`
+                        : "Local AI model setup & download"
+                      : "Using lightweight basic rules"
                   }}
                 </p>
               </div>
             </div>
 
             <div class="settings-card-right">
-              <svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg
+                class="settings-chevron"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
                 <polyline points="9 18 15 12 9 6"></polyline>
               </svg>
             </div>
@@ -994,7 +1276,7 @@ onUnmounted(() => {
   --radius-card: 20px;
   --radius-input: 12px;
   --radius-btn: 14px;
-  
+
   width: 100%;
   min-height: 100vh;
   background-color: var(--bg-page);
@@ -1035,7 +1317,8 @@ onUnmounted(() => {
   width: 100%;
   max-width: 580px;
   margin: 0 auto;
-  padding: max(1.25rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  padding: max(1.25rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -1094,7 +1377,17 @@ onUnmounted(() => {
 
 /* Hidden Inputs */
 .hidden-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Toast Banners */
@@ -1227,7 +1520,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 /* Settings Navigation Entry Button (Below Main Actions) */

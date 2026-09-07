@@ -14,7 +14,7 @@ The app allows users to share screenshots of text or images of flyers and automa
 ### 1. Receive Image via Share Button
 
 - [x] File picker upload (`<input type="file">` for PNG, JPEG, HEIF, WebP, etc.)
-- [x] Camera capture input (`capture="environment"`)
+- [x] Camera capture input (`capture="environment"`) and iOS camera/photo library usage descriptions (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSPhotoLibraryAddUsageDescription`, `NSMicrophoneUsageDescription` in `src-tauri/gen/apple/project.yml` and `src-tauri/gen/apple/share2cal_iOS/Info.plist`)
 - [x] Drag-and-drop file upload support in UI
 - [x] Clipboard image paste support (`handlePaste`)
 - [x] Native iOS Share Extension to receive images directly from the system share sheet (`src-tauri/gen/apple/ShareExtension`, App Group `group.com.dustinmichels.share2cal`, custom URL scheme `share2cal://share`, Rust bridge `src-tauri/src/share.rs`, and Vue service `src/services/share.ts`)
