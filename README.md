@@ -55,3 +55,8 @@ If you want the app installed on your iPhone running purely standalone (using th
 2.  Select Run on the left sidebar.
 3.  Change Build Configuration from Debug to Release.
 4.  Click Close and press Run (▶) to build and deploy to your iPhone.
+
+```sh
+# generate icons
+bun tauri icon path/to/icon.svg
+```

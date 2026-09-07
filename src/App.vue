@@ -15,7 +15,22 @@ import {
   clearPendingSharedImage,
   payloadToFile,
 } from "./services/share";
+import ModelSettingsModal from "./components/ModelSettingsModal.vue";
+import { getModelStatuses, type ModelStatus } from "./services/model";
 
+const isSettingsOpen = ref(false);
+const modelStatuses = ref<ModelStatus[]>([]);
+const hasLocalModel = computed(() => modelStatuses.value.some((m) => m.is_downloaded));
+const defaultModel = computed(() => modelStatuses.value.find((m) => m.is_downloaded) || modelStatuses.value.find((m) => m.is_default));
+const defaultModelName = computed(() => defaultModel.value?.name || null);
+
+async function refreshModelStatus() {
+  try {
+    modelStatuses.value = await getModelStatuses();
+  } catch (err) {
+    console.warn("Failed to check model statuses in App:", err);
+  }
+}
 const selectedFile = ref<File | null>(null);
 const previewUrl = ref<string | null>(null);
 const isDragging = ref(false);
@@ -347,6 +362,7 @@ onMounted(() => {
   window.addEventListener("focus", checkPendingShare);
   document.addEventListener("visibilitychange", handleVisibilityChange);
   checkPendingShare();
+  refreshModelStatus();
 });
 
 onUnmounted(() => {
@@ -364,6 +380,22 @@ onUnmounted(() => {
     <main class="app-container">
       <!-- App Header -->
       <header class="app-header">
+        <div class="header-top-bar">
+          <button
+            type="button"
+            class="btn-settings-pill"
+            :class="{ 'has-model': hasLocalModel }"
+            @click="isSettingsOpen = true"
+            aria-label="Model Settings"
+          >
+            <svg class="pill-gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="pill-text">{{ hasLocalModel ? (defaultModelName || 'Model Ready') : 'AI Model Settings' }}</span>
+            <span class="pill-dot" :class="hasLocalModel ? 'dot-ready' : 'dot-missing'"></span>
+          </button>
+        </div>
         <div class="logo-badge">
           <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
@@ -474,8 +506,8 @@ onUnmounted(() => {
       />
 
       <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
-      <section
-        v-if="!selectedFile"
+      <div v-if="!selectedFile" class="empty-hub-flow">
+        <section
         class="upload-hub"
         :class="{ 'is-dragging': isDragging }"
         @dragover="handleDragOver"
@@ -516,8 +548,34 @@ onUnmounted(() => {
         <div class="upload-footer">
           <p class="format-note">Supports PNG, JPG, HEIF • Also paste images via ⌘V</p>
         </div>
-      </section>
+        </section>
 
+        <!-- On-Device Model Mini Status Card -->
+        <div class="surface-card model-status-mini-card" @click="isSettingsOpen = true">
+          <div class="mini-card-icon-wrap" :class="hasLocalModel ? 'icon-ready' : 'icon-missing'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
+              <path d="M6 10a6 6 0 0 0 12 0"></path>
+              <line x1="12" y1="16" x2="12" y2="22"></line>
+              <line x1="8" y1="22" x2="16" y2="22"></line>
+            </svg>
+          </div>
+          <div class="mini-card-body">
+            <div class="mini-card-title-row">
+              <span class="mini-card-title">On-Device AI Model</span>
+              <span class="mini-status-chip" :class="hasLocalModel ? 'chip-ready' : 'chip-missing'">
+                {{ hasLocalModel ? 'Ready on Device' : 'Not Downloaded' }}
+              </span>
+            </div>
+            <p class="mini-card-desc">
+              {{ hasLocalModel ? `${defaultModelName || 'SmolLM2 360M'} active for 100% private, offline parsing.` : 'Download a tiny model (~270 MB) from Hugging Face for enhanced offline extraction.' }}
+            </p>
+          </div>
+          <button type="button" class="btn-manage-model">
+            {{ hasLocalModel ? 'Manage' : 'Download' }}
+          </button>
+        </div>
+      </div>
       <!-- STATE 2: Image Selected & Event Extracted State -->
       <section v-else class="content-flow">
         <!-- Hero Preview & Scanner Card -->
@@ -881,6 +939,13 @@ onUnmounted(() => {
         </div>
       </section>
     </main>
+
+      <!-- Model Settings Modal -->
+      <ModelSettingsModal
+        :is-open="isSettingsOpen"
+        @close="isSettingsOpen = false"
+        @models-updated="refreshModelStatus"
+      />
   </div>
 </template>
 
@@ -966,6 +1031,55 @@ onUnmounted(() => {
   align-items: center;
   text-align: center;
   padding: 0.5rem 0.5rem 0.25rem;
+}
+
+.header-top-bar {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.25rem;
+}
+
+.btn-settings-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-subtle);
+  transition: all 0.15s ease;
+}
+
+.btn-settings-pill:hover {
+  background: var(--bg-input);
+  transform: translateY(-1px);
+}
+
+.pill-gear-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dot-ready {
+  background: #34c759;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.6);
+}
+
+.dot-missing {
+  background: #ff9500;
 }
 
 .logo-badge {
@@ -1139,6 +1253,114 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1.25rem;
   transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Model Status Mini Card in Empty State */
+.model-status-mini-card {
+  cursor: pointer;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  transition: all 0.2s ease;
+}
+
+.model-status-mini-card:hover {
+  border-color: rgba(0, 122, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.mini-card-icon-wrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mini-card-icon-wrap svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-ready {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+}
+
+.icon-missing {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+
+.mini-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.mini-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mini-card-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mini-status-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+}
+
+.mini-status-chip.chip-ready {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+}
+
+.mini-status-chip.chip-missing {
+  background: rgba(142, 142, 147, 0.15);
+  color: var(--text-muted);
+}
+
+.mini-card-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.35;
+}
+
+.btn-manage-model {
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-manage-model:hover {
+  background: #007aff;
+  color: #ffffff;
+}
+
+.empty-hub-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 /* Upload Hub (Empty State) */

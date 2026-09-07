@@ -22,7 +22,6 @@
 		8C5B902B6835044F87FDCF15 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 082881A3D7B646A2BD564291 /* MetalKit.framework */; };
 		A10DCC53B04CEBF1EA7F9A58 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CAA90F234DCDF94D09B6E29 /* libapp.a */; };
 		A82C0D0D33C11C6FCF33F76A /* MobileCoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 38B72463E9EC38655F4155A1 /* MobileCoreServices.framework */; };
-		AD7D50C9664E7579FE5AE634 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 910AF1ADEBA2C2BEFD37A3BF /* libapp.a */; };
 		C486E0AF8DB292C9FBF82FF0 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = FAB3B6BCD997139849557DE5 /* main.mm */; };
 		C547A5F07F7A3ADD60E9566B /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6B904061138AA2279283C1B8 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D6BBFBA868BC3D424E19C9B0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */; };
@@ -62,6 +61,7 @@
 		2B96A4E47BA98B681DC0B4E1 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		2C6B218A9E741A129C6D96C4 /* ShareViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ShareViewController.m; sourceTree = "<group>"; };
 		34D1B02BC04C1526DC94D32C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		35695E245CEC4BC807AF7405 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		38B72463E9EC38655F4155A1 /* MobileCoreServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MobileCoreServices.framework; path = System/Library/Frameworks/MobileCoreServices.framework; sourceTree = SDKROOT; };
 		3FE65E77EED40312746DB2B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		471F0F46C3232A78F11EF9CC /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
@@ -92,6 +92,7 @@
 		D10A4FDB7ACD80E4768132D5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DA93D6B6AEC7E84928AFB993 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		DF2645DB9AD20966E78F2E38 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		EE101488C62555E88640C06C /* model.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = model.rs; sourceTree = "<group>"; };
 		F0298A197D26609C225A7EAA /* main.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = main.rs; sourceTree = "<group>"; };
 		F677026F1948574E8CF4EAE0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		F83D5AD1BEB072EAACD676B9 /* calendar.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = calendar.rs; sourceTree = "<group>"; };
@@ -179,6 +180,7 @@
 				F83D5AD1BEB072EAACD676B9 /* calendar.rs */,
 				5E91CC88679B5609D052D692 /* lib.rs */,
 				F0298A197D26609C225A7EAA /* main.rs */,
+				EE101488C62555E88640C06C /* model.rs */,
 				CDE1145D93D8DC49AACD85F9 /* ocr_apple.h */,
 				4BB6744549204134D5B9AECD /* ocr_apple.m */,
 				62789070DE6AE14AF193AD52 /* ocr.rs */,
@@ -189,6 +191,14 @@
 			);
 			name = src;
 			path = ../../src;
+			sourceTree = "<group>";
+		};
+		37EF36F1A31D069B43066150 /* release */ = {
+			isa = PBXGroup;
+			children = (
+				35695E245CEC4BC807AF7405 /* libapp.a */,
+			);
+			path = release;
 			sourceTree = "<group>";
 		};
 		4E415844134DEF1A87F62DFF /* Externals */ = {
@@ -262,6 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				66FF077D4FEFCFFBCA41D6AE /* debug */,
+				37EF36F1A31D069B43066150 /* release */,
 			);
 			path = arm64;
 			sourceTree = "<group>";
@@ -316,7 +327,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2660;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					02673756E0B467B683C9C7A8 = {
 						ProvisioningStyle = Automatic;
@@ -354,7 +365,6 @@
 				68FF2A1B46CEE987DFE667BC /* Assets.xcassets in Resources */,
 				D6BBFBA868BC3D424E19C9B0 /* LaunchScreen.storyboard in Resources */,
 				86EF1C15CD5B0F7EF8C68D4D /* assets in Resources */,
-				AD7D50C9664E7579FE5AE634 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -462,7 +472,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -472,6 +481,8 @@
 		5AE6050DD7AAB8C4F0A098C2 /* debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = share2cal_iOS/share2cal_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -504,7 +515,7 @@
 					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal;
-				PRODUCT_NAME = "share2cal";
+				PRODUCT_NAME = share2cal;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -514,6 +525,8 @@
 		5E455F9BDDB7FA892247F7A7 /* release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = share2cal_iOS/share2cal_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -546,7 +559,7 @@
 					"$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.dustinmichels.share2cal;
-				PRODUCT_NAME = "share2cal";
+				PRODUCT_NAME = share2cal;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -556,6 +569,7 @@
 		6E28D3AB939BAAAA1872C971 /* debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -633,7 +647,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -643,6 +656,7 @@
 		D55FDCE7A1437EB863EECAF4 /* release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;

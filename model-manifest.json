@@ -1,0 +1,49 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-09-07T00:00:00Z",
+  "default_model_id": "smollm2-360m-instruct-q4_k_m",
+  "models": [
+    {
+      "id": "smollm2-360m-instruct-q4_k_m",
+      "name": "SmolLM2 360M Instruct",
+      "version": "1.0.0",
+      "filename": "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+      "repo": "bartowski/SmolLM2-360M-Instruct-GGUF",
+      "url": "https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf",
+      "size_bytes": 270590880,
+      "sha256": "2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2",
+      "quantization": "Q4_K_M",
+      "description": "Recommended. Balanced 360M model offering fast inference, low RAM consumption, and reliable structured event extraction.",
+      "recommended_ram": "< 300 MB",
+      "is_default": true
+    },
+    {
+      "id": "smollm2-135m-instruct-q4_k_m",
+      "name": "SmolLM2 135M Instruct",
+      "version": "1.0.0",
+      "filename": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+      "repo": "bartowski/SmolLM2-135M-Instruct-GGUF",
+      "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf",
+      "size_bytes": 105454432,
+      "sha256": "2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d",
+      "quantization": "Q4_K_M",
+      "description": "Ultra-lightweight 135M model with minimal storage footprint. Recommended for older devices or tight storage.",
+      "recommended_ram": "< 150 MB",
+      "is_default": false
+    },
+    {
+      "id": "qwen2.5-0.5b-instruct-q4_k_m",
+      "name": "Qwen2.5 0.5B Instruct",
+      "version": "1.0.0",
+      "filename": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "size_bytes": 491400032,
+      "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+      "quantization": "Q4_K_M",
+      "description": "High-accuracy 0.5B model with strong multilingual comprehension and complex flyer layout parsing.",
+      "recommended_ram": "< 550 MB",
+      "is_default": false
+    }
+  ]
+}

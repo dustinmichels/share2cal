@@ -1,4 +1,5 @@
 pub mod calendar;
+pub mod model;
 pub mod ocr;
 pub mod parser;
 pub mod share;
@@ -124,10 +125,51 @@ fn request_calendar_permission() -> Result<bool, String> {
     calendar::request_permission()
 }
 
+#[tauri::command]
+fn get_model_manifest() -> Result<model::ModelManifest, String> {
+    model::get_manifest()
+}
+
+#[tauri::command]
+fn get_model_statuses(app: tauri::AppHandle) -> Result<Vec<model::ModelStatus>, String> {
+    model::get_all_model_statuses(&app)
+}
+
+#[tauri::command]
+fn get_model_status(app: tauri::AppHandle, model_id: String) -> Result<model::ModelStatus, String> {
+    model::get_single_model_status(&app, &model_id)
+}
+
+#[tauri::command]
+async fn download_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    model::start_model_download(app, model_id).await
+}
+
+#[tauri::command]
+fn cancel_model_download(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    model::cancel_download(&app, &model_id)
+}
+
+#[tauri::command]
+fn delete_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    model::delete_model_file(&app, &model_id)
+}
+
+#[tauri::command]
+fn verify_model_hash(app: tauri::AppHandle, model_id: String) -> Result<bool, String> {
+    model::verify_model(&app, &model_id)
+}
+
+#[tauri::command]
+fn get_models_storage_info(app: tauri::AppHandle) -> Result<model::ModelsStorageInfo, String> {
+    model::get_models_storage_info(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(model::DownloadState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             extract_text_from_image,
@@ -143,7 +185,15 @@ pub fn run() {
             stage_shared_image,
             create_calendar_event,
             check_calendar_permission,
-            request_calendar_permission
+            request_calendar_permission,
+            get_model_manifest,
+            get_model_statuses,
+            get_model_status,
+            download_model,
+            cancel_model_download,
+            delete_model,
+            verify_model_hash,
+            get_models_storage_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
