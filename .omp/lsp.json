@@ -1,0 +1,24 @@
+{
+  "servers": {
+    "rust-analyzer": {
+      "rootMarkers": ["package.json"],
+      "settings": {
+        "rust-analyzer": {
+          "linkedProjects": ["src-tauri/Cargo.toml"]
+        }
+      }
+    },
+    "vue-language-server": {
+      "command": "vue-language-server",
+      "args": ["--stdio"],
+      "fileTypes": [".vue"],
+      "rootMarkers": ["package.json"]
+    },
+    "typescript-language-server": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "fileTypes": [".ts", ".js", ".json"],
+      "rootMarkers": ["package.json", "tsconfig.json"]
+    }
+  }
+}

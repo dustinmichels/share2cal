@@ -69,12 +69,73 @@ export async function getModelManifest(): Promise<ModelManifest> {
 /**
  * Retrieves the current status, path, and download state for all models.
  */
+const DEFAULT_FALLBACK_MODELS: ModelStatus[] = [
+  {
+    id: "smollm2-360m-instruct-q4_k_m",
+    name: "SmolLM2 360M Instruct",
+    filename: "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+    size_bytes: 270590880,
+    downloaded_bytes: 0,
+    is_downloaded: false,
+    is_downloading: false,
+    file_path: null,
+    storage_dir: "/data/user/0/com.share2cal.app/files/models",
+    sha256: "2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2",
+    is_verified: false,
+    error: null,
+    quantization: "Q4_K_M",
+    description: "Recommended. Balanced 360M model offering fast inference, low RAM consumption, and reliable structured event extraction.",
+    recommended_ram: "< 300 MB",
+    is_default: true,
+  },
+  {
+    id: "smollm2-135m-instruct-q4_k_m",
+    name: "SmolLM2 135M Instruct",
+    filename: "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    size_bytes: 105454432,
+    downloaded_bytes: 0,
+    is_downloaded: false,
+    is_downloading: false,
+    file_path: null,
+    storage_dir: "/data/user/0/com.share2cal.app/files/models",
+    sha256: "2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d",
+    is_verified: false,
+    error: null,
+    quantization: "Q4_K_M",
+    description: "Ultra-lightweight 135M model with minimal storage footprint. Recommended for older devices or tight storage.",
+    recommended_ram: "< 150 MB",
+    is_default: false,
+  },
+  {
+    id: "qwen2.5-0.5b-instruct-q4_k_m",
+    name: "Qwen2.5 0.5B Instruct",
+    filename: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    size_bytes: 491400032,
+    downloaded_bytes: 0,
+    is_downloaded: false,
+    is_downloading: false,
+    file_path: null,
+    storage_dir: "/data/user/0/com.share2cal.app/files/models",
+    sha256: "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+    is_verified: false,
+    error: null,
+    quantization: "Q4_K_M",
+    description: "High-accuracy 0.5B model with strong multilingual comprehension and complex flyer layout parsing.",
+    recommended_ram: "< 550 MB",
+    is_default: false,
+  },
+];
+
+const browserMockModels = [...DEFAULT_FALLBACK_MODELS];
+
 export async function getModelStatuses(): Promise<ModelStatus[]> {
   try {
-    return await invoke<ModelStatus[]>("get_model_statuses");
+    const res = await invoke<ModelStatus[]>("get_model_statuses");
+    if (res && res.length > 0) return res;
+    return browserMockModels;
   } catch (err) {
-    console.warn("Failed to retrieve model statuses:", err);
-    return [];
+    console.warn("Using fallback manifest models:", err);
+    return browserMockModels;
   }
 }
 
@@ -125,8 +186,13 @@ export async function getModelsStorageInfo(): Promise<ModelsStorageInfo | null> 
   try {
     return await invoke<ModelsStorageInfo>("get_models_storage_info");
   } catch (err) {
-    console.warn("Failed to get models storage info:", err);
-    return null;
+    console.warn("Using fallback models storage info:", err);
+    return {
+      storage_dir: "/var/mobile/Containers/Data/Application/Share2Cal/models",
+      total_models_downloaded: browserMockModels.filter(m => m.is_downloaded).length,
+      total_models_size_bytes: browserMockModels.filter(m => m.is_downloaded).reduce((sum, m) => sum + m.size_bytes, 0),
+      free_disk_space_bytes: 18450000000,
+    };
   }
 }
 

@@ -15,10 +15,21 @@ import {
   clearPendingSharedImage,
   payloadToFile,
 } from "./services/share";
-import ModelSettingsModal from "./components/ModelSettingsModal.vue";
+import SettingsView from "./components/SettingsView.vue";
 import { getModelStatuses, type ModelStatus } from "./services/model";
+import {
+  getStoredParsingMode,
+  setStoredParsingMode,
+  type ParsingMode,
+} from "./services/settings";
 
-const isSettingsOpen = ref(false);
+const currentView = ref<"main" | "settings">("main");
+const parsingMode = ref<ParsingMode>(getStoredParsingMode());
+
+function updateParsingMode(mode: ParsingMode) {
+  parsingMode.value = mode;
+  setStoredParsingMode(mode);
+}
 const modelStatuses = ref<ModelStatus[]>([]);
 const hasLocalModel = computed(() => modelStatuses.value.some((m) => m.is_downloaded));
 const defaultModel = computed(() => modelStatuses.value.find((m) => m.is_downloaded) || modelStatuses.value.find((m) => m.is_default));
@@ -379,23 +390,7 @@ onUnmounted(() => {
   <div class="app-layout">
     <main class="app-container">
       <!-- App Header -->
-      <header class="app-header">
-        <div class="header-top-bar">
-          <button
-            type="button"
-            class="btn-settings-pill"
-            :class="{ 'has-model': hasLocalModel }"
-            @click="isSettingsOpen = true"
-            aria-label="Model Settings"
-          >
-            <svg class="pill-gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-            <span class="pill-text">{{ hasLocalModel ? (defaultModelName || 'Model Ready') : 'AI Model Settings' }}</span>
-            <span class="pill-dot" :class="hasLocalModel ? 'dot-ready' : 'dot-missing'"></span>
-          </button>
-        </div>
+      <header v-if="currentView === 'main'" class="app-header">
         <div class="logo-badge">
           <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
@@ -505,77 +500,53 @@ onUnmounted(() => {
         @change="handleCameraInput"
       />
 
-      <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
-      <div v-if="!selectedFile" class="empty-hub-flow">
-        <section
-        class="upload-hub"
-        :class="{ 'is-dragging': isDragging }"
-        @dragover="handleDragOver"
-        @dragleave="handleDragLeave"
-        @drop="handleDrop"
-      >
-        <div class="upload-hero">
-          <div class="upload-icon-bubble">
-            <svg class="upload-bubble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
-              <circle cx="8.5" cy="8.5" r="1.5"></circle>
-              <polyline points="21 15 16 10 5 21"></polyline>
-            </svg>
-          </div>
-          <h2 class="upload-title">Add Flyer or Screenshot</h2>
-          <p class="upload-subtitle">Choose a photo or snap a picture of an event flyer, invite, or schedule.</p>
-        </div>
-
-        <div class="upload-actions">
-          <button type="button" class="btn-touch btn-touch-primary" @click="triggerFileUpload">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            <span>Choose from Library</span>
-          </button>
-
-          <button type="button" class="btn-touch btn-touch-secondary" @click="triggerCameraCapture">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-              <circle cx="12" cy="13" r="4"></circle>
-            </svg>
-            <span>Take Photo</span>
-          </button>
-        </div>
-
-        <div class="upload-footer">
-          <p class="format-note">Supports PNG, JPG, HEIF • Also paste images via ⌘V</p>
-        </div>
-        </section>
-
-        <!-- On-Device Model Mini Status Card -->
-        <div class="surface-card model-status-mini-card" @click="isSettingsOpen = true">
-          <div class="mini-card-icon-wrap" :class="hasLocalModel ? 'icon-ready' : 'icon-missing'">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
-              <path d="M6 10a6 6 0 0 0 12 0"></path>
-              <line x1="12" y1="16" x2="12" y2="22"></line>
-              <line x1="8" y1="22" x2="16" y2="22"></line>
-            </svg>
-          </div>
-          <div class="mini-card-body">
-            <div class="mini-card-title-row">
-              <span class="mini-card-title">On-Device AI Model</span>
-              <span class="mini-status-chip" :class="hasLocalModel ? 'chip-ready' : 'chip-missing'">
-                {{ hasLocalModel ? 'Ready on Device' : 'Not Downloaded' }}
-              </span>
+      <!-- VIEW 1: Main View (Image Picker, Run, Results & Settings Button) -->
+      <div v-if="currentView === 'main'" class="main-view-flow">
+        <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
+        <div v-if="!selectedFile" class="empty-hub-flow">
+          <section
+            class="upload-hub"
+            :class="{ 'is-dragging': isDragging }"
+            @dragover="handleDragOver"
+            @dragleave="handleDragLeave"
+            @drop="handleDrop"
+          >
+            <div class="upload-hero">
+              <div class="upload-icon-bubble">
+                <svg class="upload-bubble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+              </div>
+              <h2 class="upload-title">Add Flyer or Screenshot</h2>
+              <p class="upload-subtitle">Choose a photo or snap a picture of an event flyer, invite, or schedule.</p>
             </div>
-            <p class="mini-card-desc">
-              {{ hasLocalModel ? `${defaultModelName || 'SmolLM2 360M'} active for 100% private, offline parsing.` : 'Download a tiny model (~270 MB) from Hugging Face for enhanced offline extraction.' }}
-            </p>
-          </div>
-          <button type="button" class="btn-manage-model">
-            {{ hasLocalModel ? 'Manage' : 'Download' }}
-          </button>
+
+            <div class="upload-actions">
+              <button type="button" class="btn-touch btn-touch-primary" @click="triggerFileUpload">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Choose from Library</span>
+              </button>
+
+              <button type="button" class="btn-touch btn-touch-secondary" @click="triggerCameraCapture">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                <span>Take Photo</span>
+              </button>
+            </div>
+
+            <div class="upload-footer">
+              <p class="format-note">Supports PNG, JPG, HEIF • Also paste images via ⌘V</p>
+            </div>
+          </section>
         </div>
-      </div>
       <!-- STATE 2: Image Selected & Event Extracted State -->
       <section v-else class="content-flow">
         <!-- Hero Preview & Scanner Card -->
@@ -937,15 +908,61 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-      </section>
-    </main>
+        </section>
 
-      <!-- Model Settings Modal -->
-      <ModelSettingsModal
-        :is-open="isSettingsOpen"
-        @close="isSettingsOpen = false"
+        <!-- Prominent Settings Navigation Button (Below Main Image & Action Area) -->
+        <div class="settings-nav-section">
+          <button
+            type="button"
+            class="btn-settings-card"
+            @click="currentView = 'settings'"
+            aria-label="Open Settings"
+          >
+            <div class="settings-card-left">
+              <div class="settings-card-icon-wrap">
+                <svg class="settings-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+              </div>
+              <div class="settings-card-body">
+                <div class="settings-card-title-line">
+                  <span class="settings-card-title">Settings</span>
+                  <span
+                    class="settings-badge"
+                    :class="parsingMode === 'enhanced' ? 'badge-enhanced' : 'badge-simple'"
+                  >
+                    {{ parsingMode === 'enhanced' ? (hasLocalModel ? 'Enhanced (Ready)' : 'Enhanced AI') : 'Simple' }}
+                  </span>
+                </div>
+                <p class="settings-card-subtitle">
+                  {{
+                    parsingMode === 'enhanced'
+                      ? (hasLocalModel ? `${defaultModelName || 'Local AI'} ready on device` : 'Local AI model setup & download')
+                      : 'Using lightweight basic rules'
+                  }}
+                </p>
+              </div>
+            </div>
+
+            <div class="settings-card-right">
+              <svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEW 2: Dedicated Settings Page -->
+      <SettingsView
+        v-else-if="currentView === 'settings'"
+        :parsing-mode="parsingMode"
+        @update:parsing-mode="updateParsingMode"
+        @back="currentView = 'main'"
         @models-updated="refreshModelStatus"
       />
+    </main>
   </div>
 </template>
 
@@ -1033,55 +1050,13 @@ onUnmounted(() => {
   padding: 0.5rem 0.5rem 0.25rem;
 }
 
-.header-top-bar {
-  width: 100%;
+/* Main View Flow */
+.main-view-flow {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.25rem;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
 }
-
-.btn-settings-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.75rem;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: 999px;
-  color: var(--text-primary);
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-subtle);
-  transition: all 0.15s ease;
-}
-
-.btn-settings-pill:hover {
-  background: var(--bg-input);
-  transform: translateY(-1px);
-}
-
-.pill-gear-icon {
-  width: 14px;
-  height: 14px;
-  color: var(--text-muted);
-}
-
-.pill-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.dot-ready {
-  background: #34c759;
-  box-shadow: 0 0 6px rgba(52, 199, 89, 0.6);
-}
-
-.dot-missing {
-  background: #ff9500;
-}
-
 .logo-badge {
   display: flex;
   align-items: center;
@@ -1255,108 +1230,129 @@ onUnmounted(() => {
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-/* Model Status Mini Card in Empty State */
-.model-status-mini-card {
-  cursor: pointer;
+/* Settings Navigation Entry Button (Below Main Actions) */
+.settings-nav-section {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.btn-settings-card {
+  width: 100%;
+  display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 1rem;
+  justify-content: space-between;
+  gap: 0.85rem;
   padding: 1rem 1.25rem;
-  transition: all 0.2s ease;
+  cursor: pointer;
+  text-align: left;
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-card, 20px);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
 
-.model-status-mini-card:hover {
+.btn-settings-card:hover {
   border-color: rgba(0, 122, 255, 0.3);
+  background: var(--bg-card-elevated, var(--bg-card));
   transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
 }
 
-.mini-card-icon-wrap {
-  width: 40px;
-  height: 40px;
+.settings-card-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-card-icon-wrap {
+  width: 42px;
+  height: 42px;
   border-radius: 12px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.mini-card-icon-wrap svg {
-  width: 20px;
-  height: 20px;
+.settings-card-icon {
+  width: 22px;
+  height: 22px;
 }
 
-.icon-ready {
-  background: rgba(52, 199, 89, 0.12);
-  color: #34c759;
-}
-
-.icon-missing {
-  background: rgba(0, 122, 255, 0.12);
-  color: #007aff;
-}
-
-.mini-card-body {
+.settings-card-body {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  flex: 1;
   min-width: 0;
 }
 
-.mini-card-title-row {
+.settings-card-title-line {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.mini-card-title {
-  font-size: 0.88rem;
+.settings-card-title {
+  font-size: 0.95rem;
   font-weight: 700;
   color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
-.mini-status-chip {
+.settings-badge {
   font-size: 0.68rem;
   font-weight: 700;
-  padding: 0.12rem 0.45rem;
+  padding: 0.15rem 0.45rem;
   border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
-.mini-status-chip.chip-ready {
-  background: rgba(52, 199, 89, 0.15);
-  color: #34c759;
+.badge-enhanced {
+  background: rgba(88, 86, 214, 0.12);
+  color: #5856d6;
 }
 
-.mini-status-chip.chip-missing {
-  background: rgba(142, 142, 147, 0.15);
-  color: var(--text-muted);
+.badge-simple {
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-primary);
 }
 
-.mini-card-desc {
-  font-size: 0.78rem;
+.settings-card-subtitle {
+  font-size: 0.8rem;
   color: var(--text-secondary);
   margin: 0;
-  line-height: 1.35;
-}
-
-.btn-manage-model {
-  background: rgba(0, 122, 255, 0.1);
-  color: #007aff;
-  border: none;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.4rem 0.8rem;
-  border-radius: 8px;
-  cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.btn-manage-model:hover {
-  background: #007aff;
-  color: #ffffff;
+.settings-card-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-tertiary, #9ca3af);
+  padding-left: 0.25rem;
 }
 
+.settings-chevron {
+  width: 20px;
+  height: 20px;
+  transition: transform 0.15s ease;
+}
+
+.btn-settings-card:hover .settings-chevron {
+  transform: translateX(2px);
+  color: var(--accent-primary);
+}
 .empty-hub-flow {
   display: flex;
   flex-direction: column;
