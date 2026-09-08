@@ -1329,13 +1329,13 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
 
     // 2. Scan for address / venue keywords in lines
     let venue_keywords = [
-        "PARK", "SQUARE", "HALL", "CENTER", "CENTRE", "AUDITORIUM", "STREET", "ST.",
+        "PARK", "SQUARE", "HALL", "CENTER", "CENTRE", "AUDITORIUM", "BALLROOM", "STREET", "ST.",
         "AVENUE", "AVE", "BOULEVARD", "BLVD", "ROAD", "RD", "DRIVE", "DR", "PLAZA",
         "ROOM", "CLUB", "THEATRE", "THEATER", "BAR", "GRILL", "CAFE", "BREWERY",
         "CHURCH", "LIBRARY", "MUSEUM", "GARDEN", "GARDENS", "STADIUM", "ARENA",
         "FIELD", "HOUSE", "LOUNGE", "HQ", "CAMPUS", "HUB", "STUDIO", "BUILDING",
-        "TOWER", "GALLERY", "SPACE", "OFFICE", "PAVILION", "COMMONS", "HOTEL",
-        "RESTAURANT", "TAVERN", "PUB", "ZOOM", "GOOGLE MEET", "TEAMS", "WEBEX", "DISCORD",
+        "TOWER", "GALLERY", "SPACE", "OFFICE", "PAVILION", "COMMONS", "HOTEL", "LAWN",
+        "RESTAURANT", "TAVERN", "PUB", "AMPHITHEATER", "STAGE", "ZOOM", "GOOGLE MEET", "TEAMS", "WEBEX", "DISCORD",
     ];
 
     for (i, line) in lines.iter().enumerate() {
@@ -1350,23 +1350,31 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
             continue;
         }
 
-        // Check if this line contains a venue keyword
+        // Check if this line contains a venue keyword (handling both multi-word phrases and word boundaries)
         let has_venue_kw = venue_keywords.iter().any(|&kw| {
-            if kw.len() <= 3 {
-                upper.split_whitespace().any(|word| word == kw || word.trim_matches(|c: char| !c.is_alphanumeric()) == kw)
-            } else {
+            if kw.contains(' ') {
                 upper.contains(kw)
+            } else {
+                let clean_kw = kw.trim_end_matches('.');
+                upper.split_whitespace().any(|word| {
+                    let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric());
+                    cleaned == kw || cleaned == clean_kw
+                })
             }
         });
-
         if has_venue_kw {
             let mut loc = trimmed.to_string();
             if i + 1 < lines.len() {
                 let next = lines[i + 1].trim();
                 let next_upper = next.to_uppercase();
-                if (next_upper.contains("STREET") || next_upper.contains("AVE") || next_upper.contains("ST.")
-                    || next_upper.contains("ROAD") || next_upper.contains("ROOM"))
-                    && !next.starts_with('*') && !is_date_or_time_line(&next_upper) {
+                let is_addr_or_city = next_upper.split_whitespace().any(|word| {
+                    let c = word.trim_matches(|c: char| !c.is_alphanumeric());
+                    c == "STREET" || c == "AVE" || c == "AVENUE" || c == "ST" || c == "ROAD" || c == "RD"
+                        || c == "ROOM" || c == "BLVD" || c == "WAY" || c == "LANE" || c == "LN"
+                        || c == "HIGHWAY" || c == "HWY" || c == "DRIVE" || c == "DR"
+                }) || (next_upper.contains(',') && !next_upper.contains("INVITE") && !next_upper.contains("WE "));
+                if is_addr_or_city && !next.starts_with('*') && !is_date_or_time_line(&next_upper) && !is_noise_or_metadata_line(next)
+                    && !next_upper.contains("INVITE") && !next_upper.contains("DESSERT") && !next_upper.contains("WE ") {
                     loc = format!("{}, {}", loc, next);
                 }
             }
@@ -1416,6 +1424,12 @@ fn is_noise_or_metadata_line(s: &str) -> bool {
         return true;
     }
     let lower = trimmed.to_lowercase();
+    if lower == "follow" || lower == "following" || lower == "followers"
+        || lower.starts_with("liked by ") || lower.ends_with("days ago")
+        || lower.ends_with("hours ago") || lower.ends_with("mins ago")
+        || lower == "more" || lower == "less" {
+        return true;
+    }
     if (lower.contains("accommodations") || lower.contains("interpreter") || lower.contains("contact")) && lower.contains("311") {
         return true;
     }
@@ -1432,19 +1446,52 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
         "CONFERENCE", "SUMMIT", "WORKSHOP", "SYMPOSIUM", "WEBINAR", "SHOW",
         "EXHIBITION", "FAIR", "GALA", "DINNER", "BRUNCH", "FUNDRAISER",
         "PARADE", "MARKET", "BLOCK PARTY", "OPEN MIC", "GAME NIGHT", "TRIVIA",
-        "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING",
+        "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING", "SOCIAL", "ICE CREAM", "RECEPTION",
     ];
 
     let mut candidate_titles: Vec<(String, usize, i32)> = Vec::new();
 
-    for (idx, &line) in lines.iter().enumerate().take(8) {
+    // Detect supporting act / opener (e.g. "WITH\nyoubef" or "WITH youbef" or "FEATURING ...")
+    let mut supporting_act: Option<String> = None;
+    let mut supporting_indices: Vec<usize> = Vec::new();
+    for (i, &l) in lines.iter().enumerate().take(6) {
+        let t = l.trim();
+        let u = t.to_uppercase();
+        if u == "WITH" || u == "W/" || u == "FEATURING" || u == "FEAT." || u == "FT." || u == "PLUS" || u == "SPECIAL GUESTS" || u == "SPECIAL GUEST" {
+            supporting_indices.push(i);
+            if i + 1 < lines.len() {
+                let next_line = lines[i + 1].trim();
+                if !is_date_or_time_line(next_line) && !is_noise_or_metadata_line(next_line) && next_line.len() >= 2 {
+                    supporting_act = Some(next_line.to_string());
+                    supporting_indices.push(i + 1);
+                }
+            }
+        } else if u.starts_with("WITH ") || u.starts_with("W/ ") || u.starts_with("FEAT. ") || u.starts_with("FEATURING ") {
+            supporting_indices.push(i);
+            let act = if u.starts_with("WITH ") {
+                t[5..].trim()
+            } else if u.starts_with("W/ ") {
+                t[3..].trim()
+            } else if u.starts_with("FEAT. ") {
+                t[6..].trim()
+            } else {
+                t[10..].trim()
+            };
+            if !act.is_empty() {
+                supporting_act = Some(act.to_string());
+            }
+        }
+    }
+
+    for (idx, &line) in lines.iter().enumerate().take(12) {
         let trimmed = line.trim();
         let upper = trimmed.to_uppercase();
 
-        // Skip bullet lines, metadata lines, phone numbers, pure dates/times, etc.
+        // Skip bullet lines, metadata lines, phone numbers, pure dates/times, supporting act opener lines, etc.
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || is_noise_or_metadata_line(trimmed)
-            || is_date_or_time_line(trimmed) {
+            || is_date_or_time_line(trimmed)
+            || supporting_indices.contains(&idx) {
             continue;
         }
 
@@ -1468,12 +1515,23 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
         if upper == trimmed && trimmed.len() > 5 {
             score += 5;
         }
+        // If we have a supporting act and this is a top artist line (not a tour subtitle), generate "Artist (with Opener)"
+        if let Some(act) = &supporting_act {
+            if !upper.contains("TOUR") && idx <= 1 {
+                let with_title = format!("{} (with {})", trimmed, act);
+                candidate_titles.push((with_title, idx, score + 30));
+            }
+        }
 
-        // Check if preceding line is a brand/prefix (e.g. "SOMERSTREETS" before "GILMAN SQUARE ARTS & MUSIC FESTIVAL")
+        // Check if preceding line is an all-caps brand/prefix banner (e.g. "SOMERSTREETS" before "GILMAN SQUARE ARTS & MUSIC FESTIVAL")
         if idx > 0 {
             let prev = lines[idx - 1].trim();
-            if !prev.starts_with('*') && !prev.starts_with('-') && !prev.ends_with(':')
-                && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev) && prev.len() > 3 && prev.len() < 30 {
+            let prev_upper = prev.to_uppercase();
+            if prev == prev_upper
+                && !prev.starts_with('*') && !prev.starts_with('-') && !prev.ends_with(':')
+                && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev)
+                && !supporting_indices.contains(&(idx - 1))
+                && prev.len() > 3 && prev.len() < 30 {
                 let combined = format!("{}: {}", prev, trimmed);
                 candidate_titles.push((combined, idx, score + 10));
             }
@@ -1500,6 +1558,7 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
 
 fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> Option<String> {
     let mut bullet_points: Vec<String> = Vec::new();
+    let mut prose_lines: Vec<String> = Vec::new();
 
     let title_upper = title.to_uppercase();
     let loc_upper = location.map(|l| l.to_uppercase()).unwrap_or_default();
@@ -1508,28 +1567,39 @@ fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> O
         let trimmed = line.trim();
         let upper = trimmed.to_uppercase();
 
-        // Skip title, location, noise/metadata
+        // Skip title, location, noise/metadata, pure dates/times
         if title_upper.contains(&upper) || (!loc_upper.is_empty() && loc_upper.contains(&upper)) {
             continue;
         }
-        if is_noise_or_metadata_line(trimmed) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 4 {
+        if is_noise_or_metadata_line(trimmed) || (!upper.contains("RAIN DATE") && is_date_or_time_line(trimmed)) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 4 {
             continue;
         }
-        // Keep bullet points, activity highlights, rain dates, special notes
+        if trimmed.starts_with('@') || trimmed.contains("tufts_uep") || upper.starts_with("LIKED BY") || upper.contains("DAYS AGO") {
+            continue;
+        }
+
+        // Keep bullet points, activity highlights, rain dates, special notes, tour info
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || upper.contains("LIVE MUSIC") || upper.contains("PERFORMANCES") || upper.contains("BEER GARDEN")
             || upper.contains("FOOD VENDORS") || upper.contains("ARTISTS") || upper.contains("ACTIVITIES")
             || upper.contains("RAIN DATE") || upper.contains("FREE ADMISSION") || upper.contains("ALL AGES")
-            || upper.contains("SPEAKERS") || upper.contains("PIZZA") || upper.contains("DRINKS") {
+            || upper.contains("SPEAKERS") || upper.contains("PIZZA") || upper.contains("DRINKS")
+            || upper.contains("TOUR") || upper.contains("DOORS") || upper.contains("SPECIAL GUEST") {
             let clean_bullet = trimmed.trim_start_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
             if !clean_bullet.is_empty() && !bullet_points.iter().any(|b| b == clean_bullet) {
                 bullet_points.push(clean_bullet.to_string());
             }
+        } else if upper.contains("INVITE") || upper.contains("DESSERT") || upper.contains("ICE CREAM")
+            || upper.contains("COFFEE") || upper.contains("TEA") || upper.contains("FRUIT")
+            || upper.contains("JOIN US") || upper.contains("WELCOME") || upper.contains("REFRESHMENT") {
+            prose_lines.push(trimmed.to_string());
         }
     }
 
     if !bullet_points.is_empty() {
         Some(bullet_points.join(" • "))
+    } else if !prose_lines.is_empty() {
+        Some(prose_lines.join(" "))
     } else {
         None
     }
@@ -1629,6 +1699,115 @@ NO EGU"#;
         );
 
         assert!(event.confidence >= 0.7, "Confidence should be high, got: {}", event.confidence);
+    }
+
+    #[test]
+    fn test_parse_instagram_ice_cream_social() {
+        let ocr_text = r#"3:20
+Follow
+5G
+824
+Follow
+Tufts
+tufts_uep
+Bromfield Pearson
+UEP ICE CREAM SOCIAL
+09 Sept,
+2026
+12:00 PM - 1:00 PM
+BP LAWN
+We invite you to have
+dessert with us. Don't
+like ice cream? We
+have iced coffee, iced
+tea, and fruit too!
+Tafts
+11
+1 1
+Liked by sabina_a_dz and others
+tufts_uep Don't miss our first social event of the... more
+4 days ago
+JImmy"#;
+
+        let ctx = sample_reference_context(); // Reference 2026-09-06
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        assert_eq!(event.title, "UEP ICE CREAM SOCIAL");
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-09-09T12:00:00-04:00")
+        );
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-09-09T13:00:00-04:00")
+        );
+        assert_eq!(
+            event.description.as_deref(),
+            Some("We invite you to have dessert with us. Don't like ice cream? We have iced coffee, iced tea, and fruit too!"),
+            "Description must match the complete details text"
+        );
+    }
+    #[test]
+    fn test_parse_squirrel_flower_sample_deterministic() {
+        let ocr_text = r#"squirrei flower
+2026 TOUR
+WITH
+youbef
+SATURDAY, SEPTEMBER 26
+CRYSTAL BALLROOM
+SOMERVILLE, MA"#;
+
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        assert!(
+            event.title.to_lowercase().contains("flower"),
+            "Title should contain artist name, got: {}",
+            event.title
+        );
+        assert!(
+            event.title.contains("(with youbef)") || event.title.contains("youbef") || event.title.contains("you bet"),
+            "Title should contain supporting act, got: {}",
+            event.title
+        );
+
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-09-26"),
+            "Start date should match Saturday Sep 26 2026"
+        );
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-09-26"),
+            "End date should match Saturday Sep 26 2026"
+        );
+        assert!(
+            event.is_all_day,
+            "Date-only tour poster should be parsed as all-day event"
+        );
+
+        assert!(event.location.is_some(), "Location should be extracted");
+        let loc = event.location.unwrap();
+        assert!(
+            loc.contains("CRYSTAL BALLROOM"),
+            "Location should contain Crystal Ballroom, got: {}",
+            loc
+        );
+        assert!(
+            loc.contains("SOMERVILLE, MA") || loc.contains("SOMERVILLE"),
+            "Location should contain Somerville, MA, got: {}",
+            loc
+        );
+
+        assert!(event.description.is_some(), "Description should be extracted");
+        let desc = event.description.unwrap();
+        assert!(
+            desc.contains("2026 TOUR") || desc.contains("TOUR"),
+            "Description should contain tour details, got: {}",
+            desc
+        );
+
+        assert!(event.confidence >= 0.8, "Confidence should be high, got: {}", event.confidence);
     }
 
     #[test]

@@ -216,6 +216,21 @@ export async function getModelsStorageInfo(): Promise<ModelsStorageInfo | null> 
 }
 
 /**
+ * Opens the models storage directory in the native file manager (macOS Finder, Windows Explorer, Linux).
+ */
+export async function openModelsDirectory(): Promise<void> {
+  return await invoke("open_models_directory");
+}
+
+/**
+ * Detects if the current running environment is a desktop platform (macOS, Windows, Linux) vs mobile.
+ */
+export function isDesktopDevice(): boolean {
+  if (typeof navigator === "undefined") return true;
+  return !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+}
+
+/**
  * Subscribes to model download progress events emitted by the native Rust backend.
  */
 export async function onModelDownloadProgress(

@@ -300,11 +300,7 @@ watch(isRepeating, (newVal) => {
             class="field-input field-select"
           >
             <option value="">Default Calendar (System)</option>
-            <option
-              v-for="cal in availableCalendars"
-              :key="cal.id"
-              :value="cal.id"
-            >
+            <option v-for="cal in availableCalendars" :key="cal.id" :value="cal.id">
               {{ cal.title }} {{ cal.source_title ? `(${cal.source_title})` : "" }}
             </option>
           </select>

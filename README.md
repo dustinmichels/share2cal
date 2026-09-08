@@ -31,11 +31,15 @@ bun tauri ios dev
 
 ```sh
 sips -s format png samples/gilman_flyer.heif --out samples/gilman_flyer.png
+sips -s format png samples/ride_for_life.heif --out samples/ride_for_life.png
 ```
 
 ## Running on iphone
 
 ```sh
+# Add iOS Rust targets (if not already installed)
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
 # open Xcode
 bun tauri ios dev --open
 bun run tauri ios dev --host

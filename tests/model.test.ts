@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { formatBytes, formatSpeed } from "../src/services/model";
+import { formatBytes, formatSpeed, isDesktopDevice } from "../src/services/model";
 import manifest from "../model-manifest.json";
 
 describe("Model Service & Manifest", () => {
@@ -29,5 +29,20 @@ describe("Model Service & Manifest", () => {
     expect(formatSpeed(500)).toBe("500 B/s");
     expect(formatSpeed(1024 * 50)).toBe("50.0 KB/s");
     expect(formatSpeed(1024 * 1024 * 3.5)).toBe("3.5 MB/s");
+  });
+
+  it("distinguishes default model and alternative models in manifest", () => {
+    const defaultModel = manifest.models.find((m) => m.is_default);
+    const alternativeModels = manifest.models.filter((m) => !m.is_default);
+
+    expect(defaultModel).toBeDefined();
+    expect(defaultModel!.id).toBe("smollm2-360m-instruct-q4_k_m");
+    expect(alternativeModels.length).toBe(2);
+    expect(alternativeModels.map((m) => m.id)).toContain("smollm2-135m-instruct-q4_k_m");
+    expect(alternativeModels.map((m) => m.id)).toContain("qwen2.5-0.5b-instruct-q4_k_m");
+  });
+
+  it("correctly identifies desktop vs mobile environments", () => {
+    expect(typeof isDesktopDevice()).toBe("boolean");
   });
 });

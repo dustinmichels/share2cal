@@ -459,9 +459,20 @@ function formatEventTiming(event: EventDetails): string {
     <!-- Batch / Primary Actions -->
     <div class="preview-actions-flow">
       <!-- Destination Calendar Selection -->
-      <div v-if="availableCalendars && availableCalendars.length > 0" class="calendar-destination-row">
+      <div
+        v-if="availableCalendars && availableCalendars.length > 0"
+        class="calendar-destination-row"
+      >
         <label for="preview-target-cal" class="destination-label">
-          <svg class="dest-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="dest-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
             <line x1="16" y1="2" x2="16" y2="6"></line>
             <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -469,17 +480,9 @@ function formatEventTiming(event: EventDetails): string {
           </svg>
           <span>Save to:</span>
         </label>
-        <select
-          id="preview-target-cal"
-          v-model="selectedCalendarId"
-          class="destination-select"
-        >
+        <select id="preview-target-cal" v-model="selectedCalendarId" class="destination-select">
           <option value="">Default Calendar (System)</option>
-          <option
-            v-for="cal in availableCalendars"
-            :key="cal.id"
-            :value="cal.id"
-          >
+          <option v-for="cal in availableCalendars" :key="cal.id" :value="cal.id">
             {{ cal.title }} {{ cal.source_title ? `· ${cal.source_title}` : "" }}
           </option>
         </select>

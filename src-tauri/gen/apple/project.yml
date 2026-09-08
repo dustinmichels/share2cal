@@ -31,6 +31,7 @@ targets:
   share2cal_iOS:
     type: application
     platform: iOS
+    productName: Share2Cal
     sources:
       - path: Sources
       - path: Assets.xcassets

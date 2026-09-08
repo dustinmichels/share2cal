@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
-import { ArrowLeft, LoaderCircle } from "lucide-vue-next";
+import { ArrowLeft, LoaderCircle, Settings } from "lucide-vue-next";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { extractTextFromBytes, type OcrResult } from "./services/ocr";
 import {
@@ -41,7 +41,6 @@ import ImagePreviewCard from "./components/ImagePreviewCard.vue";
 import EventPreviewCard from "./components/EventPreviewCard.vue";
 import EventFormCard from "./components/EventFormCard.vue";
 import OcrDrawer from "./components/OcrDrawer.vue";
-import SettingsNavCard from "./components/SettingsNavCard.vue";
 import SettingsView from "./components/SettingsView.vue";
 const currentView = ref<"main" | "summary" | "settings">("main");
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
@@ -52,13 +51,6 @@ function updateParsingMode(mode: ParsingMode) {
 }
 
 const modelStatuses = ref<ModelStatus[]>([]);
-const hasLocalModel = computed(() => modelStatuses.value.some((m) => m.is_downloaded));
-const defaultModel = computed(
-  () =>
-    modelStatuses.value.find((m) => m.is_downloaded) ||
-    modelStatuses.value.find((m) => m.is_default),
-);
-const defaultModelName = computed(() => defaultModel.value?.name || null);
 
 async function refreshModelStatus() {
   try {
@@ -335,7 +327,14 @@ async function handleGo() {
         "No text was detected in this image. Try another photo with clearer text.";
     } else {
       // Parse multiple or single event details from the extracted OCR text
-      const parsed = await parseEventsFromText(res.text);
+      const parsed = await parseEventsFromText(
+        res.text,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        parsingMode.value,
+      );
       eventsList.value = parsed;
     }
   } catch (err: unknown) {
@@ -351,7 +350,14 @@ async function handleGo() {
 async function handleReparse() {
   if (!ocrResult.value?.text) return;
   try {
-    const parsed = await parseEventsFromText(ocrResult.value.text);
+    const parsed = await parseEventsFromText(
+      ocrResult.value.text,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      parsingMode.value,
+    );
     eventsList.value = parsed;
     selectedEventIndex.value = null;
     addedEventIndices.value = new Set();
@@ -448,10 +454,7 @@ async function handleSingleAddToCalendar() {
   calendarDownloaded.value = false;
 
   try {
-    const result = await addEventToNativeCalendar(
-      event,
-      selectedCalendarId.value || undefined,
-    );
+    const result = await addEventToNativeCalendar(event, selectedCalendarId.value || undefined);
     if (result.success) {
       if (selectedEventIndex.value !== null) {
         addedEventIndices.value.add(selectedEventIndex.value);
@@ -661,6 +664,15 @@ onUnmounted(() => {
     <main class="app-container">
       <!-- App Header -->
       <header v-if="currentView === 'main'" class="app-header">
+        <button
+          type="button"
+          class="btn-settings-icon"
+          aria-label="Open Settings"
+          title="Settings"
+          @click="currentView = 'settings'"
+        >
+          <Settings class="settings-icon" :stroke-width="2" />
+        </button>
         <div class="logo-badge">
           <svg
             class="logo-icon"
@@ -879,14 +891,6 @@ onUnmounted(() => {
             @take-photo="triggerCameraCapture"
           />
         </section>
-
-        <!-- Prominent Settings Navigation Button (Below Main Image & Action Area) -->
-        <SettingsNavCard
-          :parsing-mode="parsingMode"
-          :has-local-model="hasLocalModel"
-          :default-model-name="defaultModelName"
-          @open-settings="currentView = 'settings'"
-        />
       </div>
 
       <!-- VIEW 2: Event Summary -->
@@ -973,8 +977,16 @@ onUnmounted(() => {
         v-else-if="currentView === 'settings'"
         :parsing-mode="parsingMode"
         @update:parsing-mode="updateParsingMode"
-        @back="currentView = 'main'; refreshCalendars();"
-        @models-updated="() => { refreshModelStatus(); refreshCalendars(); }"
+        @back="
+          currentView = 'main';
+          refreshCalendars();
+        "
+        @models-updated="
+          () => {
+            refreshModelStatus();
+            refreshCalendars();
+          }
+        "
       />
 
       <!-- Drop Overlay for when an image is already selected or on other views -->
@@ -1081,11 +1093,55 @@ onUnmounted(() => {
 
 /* Header */
 .app-header {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   padding: 0.5rem 0.5rem 0.25rem;
+  width: 100%;
+}
+
+.btn-settings-icon {
+  position: absolute;
+  top: 0.25rem;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow-subtle);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-settings-icon:hover {
+  color: var(--accent-primary);
+  border-color: rgba(0, 122, 255, 0.3);
+  background: var(--bg-card-elevated, var(--bg-card));
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+}
+
+.btn-settings-icon:active {
+  transform: scale(0.94);
+}
+
+.btn-settings-icon:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.settings-icon {
+  width: 20px;
+  height: 20px;
 }
 
 /* Main View Flow */

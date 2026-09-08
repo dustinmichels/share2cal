@@ -45,7 +45,6 @@ fn extract_text_from_image_bytes(bytes: Vec<u8>) -> Result<OcrResult, String> {
     }
     Ok(ocr_res)
 }
-
 pub async fn parse_events_internal(
     app: Option<&tauri::AppHandle>,
     text: &str,
@@ -53,6 +52,7 @@ pub async fn parse_events_internal(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<&str>,
     timeout_secs: Option<u64>,
+    mode: Option<&str>,
 ) -> Vec<EventDetails> {
     let context = if reference_time.is_some() || timezone_offset_minutes.is_some() {
         ReferenceContext {
@@ -62,6 +62,13 @@ pub async fn parse_events_internal(
     } else {
         ReferenceContext::now()
     };
+
+    // If explicit mode is "simple", bypass LLM inference and use deterministic rule-based parser directly
+    if let Some(m) = mode {
+        if m.eq_ignore_ascii_case("simple") {
+            return parser::parse_events_deterministic(text, &context);
+        }
+    }
 
     let schedule_events = parser::parse_schedule_table_events(text, &context);
     if schedule_events.len() >= 2 {
@@ -83,6 +90,7 @@ pub async fn parse_event_internal(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<&str>,
     timeout_secs: Option<u64>,
+    mode: Option<&str>,
 ) -> EventDetails {
     let events = parse_events_internal(
         app,
@@ -91,6 +99,7 @@ pub async fn parse_event_internal(
         timezone_offset_minutes,
         model_id,
         timeout_secs,
+        mode,
     )
     .await;
     events.into_iter().next().unwrap_or_else(|| {
@@ -110,6 +119,7 @@ async fn parse_events_from_text(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<Vec<EventDetails>, String> {
     Ok(parse_events_internal(
         Some(&app),
@@ -118,6 +128,7 @@ async fn parse_events_from_text(
         timezone_offset_minutes,
         model_id.as_deref(),
         timeout_secs,
+        mode.as_deref(),
     )
     .await)
 }
@@ -130,6 +141,7 @@ async fn parse_event_from_text(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<EventDetails, String> {
     Ok(parse_event_internal(
         Some(&app),
@@ -138,6 +150,7 @@ async fn parse_event_from_text(
         timezone_offset_minutes,
         model_id.as_deref(),
         timeout_secs,
+        mode.as_deref(),
     )
     .await)
 }
@@ -150,6 +163,7 @@ async fn extract_events_from_image(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<Vec<EventDetails>, String> {
     let ocr_res = extract_text_from_path(&path)?;
     let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
@@ -173,6 +187,7 @@ async fn extract_events_from_image(
         timezone_offset_minutes,
         model_id.as_deref(),
         timeout_secs,
+        mode.as_deref(),
     )
     .await)
 }
@@ -185,6 +200,7 @@ async fn extract_event_from_image(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<EventDetails, String> {
     let events = extract_events_from_image(
         app,
@@ -193,6 +209,7 @@ async fn extract_event_from_image(
         timezone_offset_minutes,
         model_id,
         timeout_secs,
+        mode,
     )
     .await?;
     Ok(events.into_iter().next().unwrap_or_else(|| EventDetails {
@@ -216,6 +233,7 @@ async fn extract_events_from_image_bytes(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<Vec<EventDetails>, String> {
     let ocr_res = extract_text_from_bytes(&bytes)?;
     let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
@@ -239,6 +257,7 @@ async fn extract_events_from_image_bytes(
         timezone_offset_minutes,
         model_id.as_deref(),
         timeout_secs,
+        mode.as_deref(),
     )
     .await)
 }
@@ -251,6 +270,7 @@ async fn extract_event_from_image_bytes(
     timezone_offset_minutes: Option<i32>,
     model_id: Option<String>,
     timeout_secs: Option<u64>,
+    mode: Option<String>,
 ) -> Result<EventDetails, String> {
     let events = extract_events_from_image_bytes(
         app,
@@ -259,6 +279,7 @@ async fn extract_event_from_image_bytes(
         timezone_offset_minutes,
         model_id,
         timeout_secs,
+        mode,
     )
     .await?;
     Ok(events.into_iter().next().unwrap_or_else(|| EventDetails {
@@ -423,6 +444,10 @@ async fn verify_model_hash(app: tauri::AppHandle, model_id: String) -> Result<bo
 fn get_models_storage_info(app: tauri::AppHandle) -> Result<model::ModelsStorageInfo, String> {
     model::get_models_storage_info(&app)
 }
+#[tauri::command]
+fn open_models_directory(app: tauri::AppHandle) -> Result<(), String> {
+    model::open_models_directory(&app)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -461,6 +486,7 @@ pub fn run() {
             get_models_storage_info,
             unload_inference_model,
             is_inference_model_loaded,
+            open_models_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -489,7 +515,6 @@ mod tests {
         let ocr_res = extract_text_from_path(sample.to_str().unwrap())
             .expect("Should run OCR on sample flyer");
         assert!(!ocr_res.text.is_empty(), "OCR text should not be empty");
-
         let event = parse_event_internal(
             None,
             &ocr_res.text,
@@ -497,9 +522,9 @@ mod tests {
             Some(-240),
             None,
             None,
+            None,
         )
         .await;
-        // Strict assertions on all extractable fields from the flyer fixture
         assert!(
             event.title.contains("GILMAN SQUARE") && event.title.contains("ARTS & MUSIC FESTIVAL"),
             "Title should contain event name and subtitle, got: {}",
@@ -583,6 +608,175 @@ mod tests {
             event.confidence
         );
     }
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_extract_event_from_instagram_sample_image() {
+        let sample = get_sample_path("instagram.png");
+        assert!(sample.exists(), "Sample instagram {:?} must exist", sample);
+
+        let bytes = std::fs::read(&sample).expect("Should read sample instagram image bytes");
+        let ocr_res = extract_text_from_image_bytes(bytes)
+            .expect("Should run OCR on sample instagram image bytes");
+        assert!(!ocr_res.text.is_empty(), "OCR text should not be empty");
+
+        let event = parse_event_internal(
+            None,
+            &ocr_res.text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+            Some("simple"),
+        )
+        .await;
+
+        assert_eq!(
+            event.title, "UEP ICE CREAM SOCIAL",
+            "Title must match UEP ICE CREAM SOCIAL"
+        );
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-09-09T12:00:00-04:00"),
+            "Start time must match September 9, 2026 at 12:00 PM EDT"
+        );
+
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-09-09T13:00:00-04:00"),
+            "End time must match September 9, 2026 at 1:00 PM EDT"
+        );
+
+        assert!(
+            !event.is_all_day,
+            "Instagram event with 12:00 PM - 1:00 PM is not an all-day event"
+        );
+
+        assert_eq!(
+            event.location.as_deref(),
+            Some("BP LAWN"),
+            "Location must match BP LAWN"
+        );
+
+        assert_eq!(
+            event.description.as_deref(),
+            Some("We invite you to have dessert with us. Don't like ice cream? We have iced coffee, iced tea, and fruit too!"),
+            "Description must match the complete user-supplied details sentence"
+        );
+        assert!(
+            event.confidence >= 0.9,
+            "Confidence score should be high, got: {}",
+            event.confidence
+        );
+    }
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_extract_event_from_squirrel_flower_sample_image() {
+        let sample = get_sample_path("squirrel_flower.jpg");
+        assert!(sample.exists(), "Sample flyer {:?} must exist", sample);
+
+        let ocr_res = extract_text_from_path(sample.to_str().unwrap())
+            .expect("Should run OCR on sample image");
+        assert!(!ocr_res.text.is_empty(), "OCR text should not be empty");
+
+        let event = parse_event_internal(
+            None,
+            &ocr_res.text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(
+            event.title.to_lowercase().contains("flower"),
+            "Title should contain artist name, got: {}",
+            event.title
+        );
+        assert!(
+            event.title.contains("(with") || event.title.contains("youbef") || event.title.contains("you bet"),
+            "Title should contain supporting act, got: {}",
+            event.title
+        );
+
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-09-26"),
+            "Start time must match Saturday Sep 26 2026"
+        );
+
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-09-26"),
+            "End time must match Saturday Sep 26 2026"
+        );
+
+        assert!(
+            event.is_all_day,
+            "Tour poster with date only is an all-day event"
+        );
+
+        assert!(event.location.is_some(), "Location should be extracted");
+        let loc = event.location.as_deref().unwrap();
+        assert!(
+            loc.contains("CRYSTAL BALLROOM"),
+            "Location must contain Crystal Ballroom, got: {}",
+            loc
+        );
+        assert!(
+            loc.contains("SOMERVILLE, MA") || loc.contains("SOMERVILLE"),
+            "Location must contain Somerville, MA, got: {}",
+            loc
+        );
+
+        assert!(
+            event.description.is_some(),
+            "Description should be extracted"
+        );
+        let desc = event.description.as_deref().unwrap();
+        assert!(
+            desc.contains("2026 TOUR") || desc.contains("TOUR"),
+            "Description must contain tour info, got: {}",
+            desc
+        );
+
+        assert!(
+            event.confidence >= 0.8,
+            "Confidence score should be high, got: {}",
+            event.confidence
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_extract_events_plural_from_squirrel_flower_flyer() {
+        let sample = get_sample_path("squirrel_flower.jpg");
+        assert!(sample.exists(), "Sample flyer {:?} must exist", sample);
+
+        let ocr_res = extract_text_from_path(sample.to_str().unwrap())
+            .expect("Should run OCR on sample flyer");
+        let events = parse_events_internal(
+            None,
+            &ocr_res.text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(events.len(), 1, "Expected single event from tour poster");
+        assert!(
+            events[0].title.to_lowercase().contains("flower"),
+            "Title should contain artist name"
+        );
+        assert_eq!(events[0].start_time.as_deref(), Some("2026-09-26"));
+        assert!(events[0].is_all_day);
+        assert!(events[0].location.as_deref().unwrap().contains("CRYSTAL BALLROOM"));
+    }
+
 
     #[tokio::test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -611,9 +805,9 @@ mod tests {
             Some(-240),
             None,
             None,
+            None,
         )
         .await;
-        assert!(!events.is_empty(), "Events list should not be empty");
         assert!(
             events[0].title.contains("GILMAN SQUARE")
                 && events[0].title.contains("ARTS & MUSIC FESTIVAL"),
@@ -669,9 +863,9 @@ mod tests {
             Some(-240),
             None,
             None,
+            None,
         )
         .await;
-
         assert_eq!(
             events.len(),
             6,
@@ -840,7 +1034,6 @@ mod tests {
             ocr_res.text.contains("CEE 0154-03") && ocr_res.text.contains("Principles Epidemiology"),
             "OCR text should contain course code and description in reconstructed rows"
         );
-
         let events = parse_events_internal(
             None,
             &ocr_res.text,
@@ -848,9 +1041,9 @@ mod tests {
             Some(-240),
             None,
             None,
+            None,
         )
         .await;
-
         assert_eq!(events.len(), 6, "Expected exactly 6 parsed events");
         assert_eq!(events[0].title, "CEE 0154-03 (80513) Principles Epidemiology (Lecture)");
         assert_eq!(events[0].start_time.as_deref(), Some("2026-09-07T15:00:00-04:00"));
@@ -888,5 +1081,26 @@ mod tests {
             let empty = get_pending_shared_image(Some(false)).expect("Get pending should succeed");
             assert!(empty.is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_parse_events_simple_mode_forces_deterministic() {
+        let text = "Team Standup Meeting\nFriday, Sep 18, 2026\n10:00 AM - 11:00 AM\nRoom 4B";
+        let events = parse_events_internal(
+            None,
+            text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+            Some("simple"),
+        )
+        .await;
+
+        assert_eq!(events.len(), 1);
+        assert!(events[0].title.contains("Team Standup Meeting") || events[0].title.contains("Standup"));
+        assert_eq!(events[0].start_time.as_deref(), Some("2026-09-18T10:00:00-04:00"));
+        assert_eq!(events[0].end_time.as_deref(), Some("2026-09-18T11:00:00-04:00"));
+        assert_eq!(events[0].source, "deterministic");
     }
 }

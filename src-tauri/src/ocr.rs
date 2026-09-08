@@ -296,7 +296,92 @@ mod tests {
             "Expected text to contain festival info"
         );
     }
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn test_ocr_squirrel_flower_sample() {
+        let sample = get_sample_path("squirrel_flower.jpg");
+        assert!(sample.exists(), "Sample file {:?} should exist", sample);
 
+        let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed");
+        println!("--- Extracted OCR Text for squirrel_flower.jpg ---\n{}\n---------------------------------------------", result.text);
+        assert!(!result.text.is_empty(), "Extracted text should not be empty");
+        assert!(!result.lines.is_empty(), "Lines should not be empty");
+        let upper = result.text.to_uppercase();
+        assert!(
+            upper.contains("FLOWER") || upper.contains("SQUIRRE"),
+            "Expected text to contain artist name, got:\n{}",
+            result.text
+        );
+        assert!(
+            upper.contains("2026 TOUR") || upper.contains("TOUR"),
+            "Expected text to contain tour info, got:\n{}",
+            result.text
+        );
+        assert!(
+            upper.contains("SEPTEMBER 26") || upper.contains("SEPTEMBER"),
+            "Expected text to contain concert date, got:\n{}",
+            result.text
+        );
+        assert!(
+            upper.contains("CRYSTAL BALLROOM"),
+            "Expected text to contain venue Crystal Ballroom, got:\n{}",
+            result.text
+        );
+        assert!(
+            upper.contains("SOMERVILLE, MA") || upper.contains("SOMERVILLE"),
+            "Expected text to contain city Somerville, got:\n{}",
+            result.text
+        );
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn test_ocr_from_squirrel_flower_bytes() {
+        let sample = get_sample_path("squirrel_flower.jpg");
+        let bytes = std::fs::read(&sample).expect("Should read squirrel_flower.jpg sample file");
+
+        let result = extract_text_from_bytes(&bytes).expect("OCR from bytes should succeed");
+        assert!(!result.text.is_empty());
+        let upper = result.text.to_uppercase();
+        assert!(upper.contains("FLOWER") || upper.contains("SQUIRRE"));
+        assert!(upper.contains("CRYSTAL BALLROOM"));
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn test_ocr_instagram_sample() {
+        let sample = get_sample_path("instagram.png");
+        assert!(sample.exists(), "Sample file {:?} should exist", sample);
+
+        let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed");
+        println!("--- Extracted OCR Text for instagram.png ---\n{}\n---------------------------------------------", result.text);
+        assert!(!result.text.is_empty(), "Extracted text should not be empty");
+        assert!(
+            result.text.contains("UEP ICE CREAM SOCIAL"),
+            "Expected text to contain 'UEP ICE CREAM SOCIAL', got:\n{}",
+            result.text
+        );
+        assert!(
+            result.text.contains("BP LAWN"),
+            "Expected text to contain 'BP LAWN', got:\n{}",
+            result.text
+        );
+        assert!(
+            result.text.contains("12:00 PM - 1:00 PM") || result.text.contains("12:00 PM"),
+            "Expected text to contain time range, got:\n{}",
+            result.text
+        );
+        assert!(
+            result.text.contains("09 Sept") || result.text.contains("Sept"),
+            "Expected text to contain date, got:\n{}",
+            result.text
+        );
+        assert!(
+            result.text.contains("dessert with us") || result.text.contains("ice cream"),
+            "Expected text to contain details, got:\n{}",
+            result.text
+        );
+    }
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     fn test_ocr_heif_sample() {

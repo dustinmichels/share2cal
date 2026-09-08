@@ -43,6 +43,7 @@ export async function parseEventsFromText(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails[]> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails[]>("parse_events_from_text", {
@@ -51,6 +52,7 @@ export async function parseEventsFromText(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 
@@ -60,6 +62,7 @@ export async function parseEventFromText(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails> {
   const events = await parseEventsFromText(
     text,
@@ -67,6 +70,7 @@ export async function parseEventFromText(
     timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   );
   if (events && events.length > 0) {
     return events[0];
@@ -78,6 +82,7 @@ export async function parseEventFromText(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 
@@ -87,6 +92,7 @@ export async function extractEventsFromImage(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails[]> {
   const ref = getCurrentReferenceTime();
   return await invoke<EventDetails[]>("extract_events_from_image", {
@@ -95,6 +101,7 @@ export async function extractEventsFromImage(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 
@@ -104,6 +111,7 @@ export async function extractEventFromImage(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails> {
   const events = await extractEventsFromImage(
     path,
@@ -111,6 +119,7 @@ export async function extractEventFromImage(
     timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   );
   if (events && events.length > 0) {
     return events[0];
@@ -122,6 +131,7 @@ export async function extractEventFromImage(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 
@@ -131,6 +141,7 @@ export async function extractEventsFromImageBytes(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails[]> {
   const ref = getCurrentReferenceTime();
   const payload = bytes instanceof Uint8Array ? Array.from(bytes) : bytes;
@@ -140,6 +151,7 @@ export async function extractEventsFromImageBytes(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 
@@ -149,6 +161,7 @@ export async function extractEventFromImageBytes(
   timezoneOffsetMinutes?: number,
   modelId?: string,
   timeoutSecs?: number,
+  mode?: string,
 ): Promise<EventDetails> {
   const events = await extractEventsFromImageBytes(
     bytes,
@@ -156,6 +169,7 @@ export async function extractEventFromImageBytes(
     timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   );
   if (events && events.length > 0) {
     return events[0];
@@ -168,6 +182,7 @@ export async function extractEventFromImageBytes(
     timezoneOffsetMinutes: timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes,
     modelId,
     timeoutSecs,
+    mode,
   });
 }
 

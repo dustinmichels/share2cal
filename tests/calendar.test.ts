@@ -110,7 +110,9 @@ describe("Calendar Service & Google Calendar Integration", () => {
       expect(url.searchParams.get("dates")).toBe("20260912T190000Z/20260912T223000Z");
       expect(url.searchParams.get("location")).toBe("Blue Note Jazz Club, NYC");
       expect(url.searchParams.get("details")).toContain("Featuring guest artists");
-      expect(url.searchParams.get("recur")).toBe("RRULE:FREQ=WEEKLY;BYDAY=SA;UNTIL=20261231T235959Z");
+      expect(url.searchParams.get("recur")).toBe(
+        "RRULE:FREQ=WEEKLY;BYDAY=SA;UNTIL=20261231T235959Z",
+      );
     });
 
     it("generates a valid URL for all-day events", () => {
@@ -137,6 +139,45 @@ describe("Calendar Service & Google Calendar Integration", () => {
       const urlString = generateGoogleCalendarUrl(eventWithRawRrule);
       const url = new URL(urlString);
       expect(url.searchParams.get("recur")).toBe("RRULE:FREQ=WEEKLY;BYDAY=TU");
+    });
+
+    it("generates a valid Google Calendar URL for UEP Ice Cream Social Instagram sample", () => {
+      const event: EventDetails = {
+        title: "UEP ICE CREAM SOCIAL",
+        start_time: "2026-09-09T12:00:00-04:00",
+        end_time: "2026-09-09T13:00:00-04:00",
+        is_all_day: false,
+        location: "BP LAWN",
+        description:
+          "We invite you to have dessert with us. Don't like ice cream? We have iced coffee, iced tea, and fruit too!",
+        confidence: 0.95,
+        source: "instagram_sample",
+      };
+      const urlString = generateGoogleCalendarUrl(event);
+      const url = new URL(urlString);
+      expect(url.searchParams.get("text")).toBe("UEP ICE CREAM SOCIAL");
+      expect(url.searchParams.get("dates")).toBe("20260909T160000Z/20260909T170000Z");
+      expect(url.searchParams.get("location")).toBe("BP LAWN");
+      expect(url.searchParams.get("details")).toContain("We invite you to have dessert with us");
+    });
+
+    it("generates a valid Google Calendar URL for Squirrel Flower concert tour sample", () => {
+      const event: EventDetails = {
+        title: "Squirrel Flower (with You Bet)",
+        start_time: "2026-09-26",
+        end_time: "2026-09-26",
+        is_all_day: true,
+        location: "Crystal Ballroom, Somerville, MA",
+        description: "2026 Tour",
+        confidence: 0.95,
+        source: "flyer_scan",
+      };
+      const urlString = generateGoogleCalendarUrl(event);
+      const url = new URL(urlString);
+      expect(url.searchParams.get("text")).toBe("Squirrel Flower (with You Bet)");
+      expect(url.searchParams.get("dates")).toBe("20260926/20260927");
+      expect(url.searchParams.get("location")).toBe("Crystal Ballroom, Somerville, MA");
+      expect(url.searchParams.get("details")).toBe("2026 Tour");
     });
   });
 

@@ -95,6 +95,28 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     source: "deterministic_flyer",
   };
 
+  const instagramIceCreamSocialEvent: EventDetails = {
+    title: "UEP ICE CREAM SOCIAL",
+    start_time: "2026-09-09T12:00:00-04:00",
+    end_time: "2026-09-09T13:00:00-04:00",
+    is_all_day: false,
+    location: "BP LAWN",
+    description:
+      "We invite you to have dessert with us. Don't like ice cream? We have iced coffee, iced tea, and fruit too!",
+    confidence: 0.95,
+    source: "deterministic_flyer",
+  };
+  const squirrelFlowerEvent: EventDetails = {
+    title: "Squirrel Flower (with You Bet)",
+    start_time: "2026-09-26",
+    end_time: "2026-09-26",
+    is_all_day: true,
+    location: "Crystal Ballroom, Somerville, MA",
+    description: "2026 Tour",
+    confidence: 0.95,
+    source: "deterministic_flyer",
+  };
+
   it("generates a multi-event RFC 5545 iCalendar (.ics) string with 6 distinct VEVENT blocks", () => {
     const icsContent = generateMultiIcsCalendarContent(sampleEvents);
 
@@ -183,6 +205,72 @@ describe("Event Service & Multi-Event ICS Generation", () => {
 
     const reconstructedEnd = buildIsoFromDateTime("2026-09-12", "17:00");
     expect(reconstructedEnd).toContain("2026-09-12T17:00");
+  });
+
+  it("generates single event ICS correctly for UEP Ice Cream Social Instagram sample", () => {
+    const ics = generateIcsCalendarContent(instagramIceCreamSocialEvent);
+    expect(ics).toStartWith("BEGIN:VCALENDAR");
+    expect(ics).toEndWith("END:VCALENDAR");
+    expect(ics).toContain("BEGIN:VEVENT");
+    expect(ics).toContain("END:VEVENT");
+    expect(ics).toContain("SUMMARY:UEP ICE CREAM SOCIAL");
+    expect(ics).toContain("LOCATION:BP LAWN");
+    expect(ics).toContain(
+      "DESCRIPTION:We invite you to have dessert with us. Don't like ice cream? We have iced coffee\\, iced tea\\, and fruit too!",
+    );
+    expect(ics).toContain("STATUS:CONFIRMED");
+    expect(ics).toContain("DTSTART:20260909T160000Z");
+    expect(ics).toContain("DTEND:20260909T170000Z");
+  });
+
+  it("extracts and formats date and time values accurately for UEP Ice Cream Social Instagram event", () => {
+    const dateInput = extractDateInput(instagramIceCreamSocialEvent.start_time);
+    expect(dateInput).toBe("2026-09-09");
+
+    const startTimeInput = extractTimeInput(instagramIceCreamSocialEvent.start_time);
+    expect(startTimeInput).toBe("12:00");
+
+    const endTimeInput = extractTimeInput(instagramIceCreamSocialEvent.end_time);
+    expect(endTimeInput).toBe("13:00");
+
+    const formattedDate = formatDateForDisplay(instagramIceCreamSocialEvent.start_time);
+    expect(formattedDate).toContain("2026");
+    expect(formattedDate).toContain("Sep");
+
+    const formattedStartTime = formatTimeForDisplay(instagramIceCreamSocialEvent.start_time);
+    expect(formattedStartTime).not.toBe("");
+
+    const formattedEndTime = formatTimeForDisplay(instagramIceCreamSocialEvent.end_time);
+    expect(formattedEndTime).not.toBe("");
+
+    const reconstructedStart = buildIsoFromDateTime("2026-09-09", "12:00");
+    expect(reconstructedStart).toContain("2026-09-09T12:00");
+
+    const reconstructedEnd = buildIsoFromDateTime("2026-09-09", "13:00");
+    expect(reconstructedEnd).toContain("2026-09-09T13:00");
+  });
+  it("generates single event ICS correctly for Squirrel Flower concert tour flyer sample", () => {
+    const ics = generateIcsCalendarContent(squirrelFlowerEvent);
+    expect(ics).toStartWith("BEGIN:VCALENDAR");
+    expect(ics).toEndWith("END:VCALENDAR");
+    expect(ics).toContain("BEGIN:VEVENT");
+    expect(ics).toContain("END:VEVENT");
+    expect(ics).toContain("SUMMARY:Squirrel Flower (with You Bet)");
+    expect(ics).toContain("LOCATION:Crystal Ballroom\\, Somerville\\, MA");
+    expect(ics).toContain("DESCRIPTION:2026 Tour");
+    expect(ics).toContain("STATUS:CONFIRMED");
+    expect(ics).toContain("DTSTART;VALUE=DATE:20260926");
+    expect(ics).toContain("DTEND;VALUE=DATE:20260926");
+  });
+
+  it("extracts and formats date values accurately for Squirrel Flower flyer event", () => {
+    const dateInput = extractDateInput(squirrelFlowerEvent.start_time);
+    expect(dateInput).toBe("2026-09-26");
+
+    const formattedDate = formatDateForDisplay(squirrelFlowerEvent.start_time);
+    expect(formattedDate).toContain("2026");
+    expect(formattedDate).toContain("Sep");
+    expect(formattedDate).toContain("26");
   });
 
   it("formats dates and times for display accurately", () => {

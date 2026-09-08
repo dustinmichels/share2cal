@@ -114,6 +114,43 @@ pub fn get_storage_directory(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Gets free disk space in bytes on Unix/macOS/iOS platforms
+
+/// Opens the models storage directory in the native file manager on desktop platforms
+pub fn open_models_directory(app: &AppHandle) -> Result<(), String> {
+    let storage_dir = get_storage_directory(app)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&storage_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open directory in Finder: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&storage_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open directory in Explorer: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&storage_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open directory: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err("Opening directory browser is not supported on mobile operating systems due to application sandboxing.".to_string())
+    }
+}
 pub fn get_free_disk_space(path: &Path) -> Option<u64> {
     #[cfg(unix)]
     {
@@ -645,7 +682,7 @@ mod tests {
 
     #[test]
     fn test_compute_file_sha256() {
-        let temp_dir = std::env::temp_dir().join("share2cal_test_sha");
+        let temp_dir = std::env::temp_dir().join(format!("share2cal_test_sha_{}_{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir_all(&temp_dir).unwrap();
         let test_file = temp_dir.join("test_file.txt");
         fs::write(&test_file, b"hello world\n").unwrap();
