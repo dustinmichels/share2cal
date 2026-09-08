@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-07
 
 ### Added
+
 - **Desktop Drag & Drop Image Import (`src-tauri/src/share.rs`, `src-tauri/src/lib.rs`, `src/services/share.ts`, `src/App.vue`, `src/components/UploadHub.vue`)**:
   - Added native desktop drag-and-drop support listening to Tauri webview events (`onDragDropEvent`) when files are dragged from Finder or File Explorer.
   - Added backend command `load_image_from_path` to read dropped image files from filesystem paths into memory payloads with MIME type detection.

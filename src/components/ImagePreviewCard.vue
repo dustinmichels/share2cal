@@ -94,11 +94,11 @@ function formatFileSize(bytes: number): string {
           >
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
-          <span>{{ hasEvent ? "Re-scan & Extract" : "Scan Flyer & Extract Event" }}</span>
+          <span>Scan and extract</span>
         </template>
         <template v-else>
           <div class="spinner-circle"></div>
-          <span>Scanning Flyer...</span>
+          <span>Scanning and extracting...</span>
         </template>
       </button>
 

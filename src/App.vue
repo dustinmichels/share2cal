@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
+import { ArrowLeft, LoaderCircle } from "lucide-vue-next";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { extractTextFromBytes, type OcrResult } from "./services/ocr";
 import {
@@ -32,7 +33,7 @@ import EventFormCard from "./components/EventFormCard.vue";
 import OcrDrawer from "./components/OcrDrawer.vue";
 import SettingsNavCard from "./components/SettingsNavCard.vue";
 import SettingsView from "./components/SettingsView.vue";
-const currentView = ref<"main" | "settings">("main");
+const currentView = ref<"main" | "summary" | "settings">("main");
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
 
 function updateParsingMode(mode: ParsingMode) {
@@ -287,9 +288,14 @@ function handlePaste(event: ClipboardEvent) {
 async function handleGo() {
   if (!selectedFile.value) return;
 
+  currentView.value = "summary";
   errorMessage.value = null;
   isProcessing.value = true;
   calendarDownloaded.value = false;
+  ocrResult.value = null;
+  eventsList.value = [];
+  selectedEventIndex.value = null;
+  addedEventIndices.value = new Set();
 
   try {
     const arrayBuffer = await selectedFile.value.arrayBuffer();
@@ -300,15 +306,10 @@ async function handleGo() {
     if (!res.text.trim()) {
       errorMessage.value =
         "No text was detected in this image. Try another photo with clearer text.";
-      eventsList.value = [];
-      selectedEventIndex.value = null;
-      addedEventIndices.value = new Set();
     } else {
       // Parse multiple or single event details from the extracted OCR text
       const parsed = await parseEventsFromText(res.text);
       eventsList.value = parsed;
-      selectedEventIndex.value = null;
-      addedEventIndices.value = new Set();
     }
   } catch (err: unknown) {
     errorMessage.value =
@@ -352,11 +353,11 @@ function getComposedEvent(): EventDetails {
     recurrence_rule: eventForm.value.recurrenceRule?.trim() || null,
     confidence:
       selectedEventIndex.value !== null
-        ? eventsList.value[selectedEventIndex.value]?.confidence ?? 0.8
+        ? (eventsList.value[selectedEventIndex.value]?.confidence ?? 0.8)
         : 0.8,
     source:
       selectedEventIndex.value !== null
-        ? eventsList.value[selectedEventIndex.value]?.source ?? "deterministic"
+        ? (eventsList.value[selectedEventIndex.value]?.source ?? "deterministic")
         : "deterministic",
   };
 }
@@ -543,8 +544,6 @@ function handleReset() {
   isFromShareExtension.value = false;
   shareNotification.value = null;
 }
-
-
 
 async function checkPendingShare() {
   try {
@@ -799,9 +798,8 @@ onUnmounted(() => {
         @change="handleCameraInput"
       />
 
-      <!-- VIEW 1: Main View (Image Picker, Run, Results & Settings Button) -->
+      <!-- VIEW 1: Image Upload -->
       <div v-if="currentView === 'main'" class="main-view-flow">
-        <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
         <div v-if="!selectedFile" class="empty-hub-flow">
           <UploadHub
             :is-dragging="isWindowDragging"
@@ -811,9 +809,7 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- STATE 2: Image Selected & Event Extracted State -->
         <section v-else class="content-flow">
-          <!-- Hero Preview & Scanner Card -->
           <ImagePreviewCard
             :file="selectedFile"
             :preview-url="previewUrl"
@@ -825,38 +821,6 @@ onUnmounted(() => {
             @choose-another="triggerFileUpload"
             @take-photo="triggerCameraCapture"
           />
-
-          <!-- PREVIEW VIEW: Event Summary / List of Events -->
-          <EventPreviewCard
-            v-if="eventsList.length > 0 && selectedEventIndex === null"
-            :events="eventsList"
-            :is-adding-to-calendar="isAddingToCalendar"
-            :copied-summary="copiedSummary"
-            :added-indices="addedEventIndices"
-            @edit-event="openEditScreen"
-            @add-to-calendar="handleBatchAddToCalendar"
-            @export-ics="handleExportIcs"
-            @copy-summary="copySummary"
-            @remove-event="handleRemoveEvent"
-          />
-
-          <!-- EDIT VIEW: Detailed Event Editing Screen -->
-          <EventFormCard
-            v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
-            v-model="eventForm"
-            :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
-            :is-adding-to-calendar="isAddingToCalendar"
-            :copied-summary="copiedSummary"
-            :current-index="selectedEventIndex"
-            :total-events="eventsList.length"
-            @back="closeEditScreen"
-            @add-to-calendar="handleSingleAddToCalendar"
-            @export-ics="handleSingleExportIcs"
-            @copy-summary="copySingleSummary"
-            @remove="handleRemoveCurrentEvent"
-          />
-          <!-- Collapsible Raw OCR Diagnostics Drawer -->
-          <OcrDrawer v-if="ocrResult" :ocr-result="ocrResult" @reparse="handleReparse" />
         </section>
 
         <!-- Prominent Settings Navigation Button (Below Main Image & Action Area) -->
@@ -868,7 +832,78 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- VIEW 2: Dedicated Settings Page -->
+      <!-- VIEW 2: Event Summary -->
+      <section v-else-if="currentView === 'summary'" class="summary-view-flow">
+        <div class="summary-nav">
+          <button
+            type="button"
+            class="btn-touch btn-touch-outline summary-back-button"
+            @click="currentView = 'main'"
+          >
+            <ArrowLeft class="btn-icon" :stroke-width="2.2" />
+            <span>Back to image upload</span>
+          </button>
+        </div>
+
+        <section
+          v-if="isProcessing"
+          class="surface-card extraction-loading-card"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <LoaderCircle class="summary-loading-icon" :stroke-width="2" aria-hidden="true" />
+          <div class="loading-copy">
+            <h2 class="section-heading">Scanning and extracting</h2>
+            <p class="section-subheading">Reading the image and building your event summary.</p>
+          </div>
+        </section>
+
+        <!-- PREVIEW VIEW: Event Summary / List of Events -->
+        <EventPreviewCard
+          v-else-if="eventsList.length > 0 && selectedEventIndex === null"
+          :events="eventsList"
+          :is-adding-to-calendar="isAddingToCalendar"
+          :copied-summary="copiedSummary"
+          :added-indices="addedEventIndices"
+          @edit-event="openEditScreen"
+          @add-to-calendar="handleBatchAddToCalendar"
+          @export-ics="handleExportIcs"
+          @copy-summary="copySummary"
+          @remove-event="handleRemoveEvent"
+        />
+
+        <!-- EDIT VIEW: Detailed Event Editing Screen -->
+        <EventFormCard
+          v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
+          v-model="eventForm"
+          :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
+          :is-adding-to-calendar="isAddingToCalendar"
+          :copied-summary="copiedSummary"
+          :current-index="selectedEventIndex"
+          :total-events="eventsList.length"
+          @back="closeEditScreen"
+          @add-to-calendar="handleSingleAddToCalendar"
+          @export-ics="handleSingleExportIcs"
+          @copy-summary="copySingleSummary"
+          @remove="handleRemoveCurrentEvent"
+        />
+
+        <section v-else class="surface-card extraction-empty-card">
+          <h2 class="section-heading">No event summary yet</h2>
+          <p class="section-subheading">
+            Go back to image upload and scan a clearer flyer or screenshot.
+          </p>
+        </section>
+
+        <!-- Collapsible Raw OCR Diagnostics Drawer -->
+        <OcrDrawer
+          v-if="!isProcessing && ocrResult"
+          :ocr-result="ocrResult"
+          @reparse="handleReparse"
+        />
+      </section>
+
+      <!-- VIEW 3: Dedicated Settings Page -->
       <SettingsView
         v-else-if="currentView === 'settings'"
         :parsing-mode="parsingMode"
@@ -1006,6 +1041,73 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+.summary-view-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.summary-nav {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.summary-back-button {
+  width: auto;
+  min-height: 44px;
+  padding: 0.7rem 0.9rem;
+}
+
+.extraction-loading-card,
+.extraction-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1rem;
+  min-height: 260px;
+  padding: 2.5rem 1.5rem;
+}
+
+.summary-loading-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--accent-primary);
+  animation: summaryLoadingSpin 1s linear infinite;
+}
+
+.loading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.extraction-loading-card .section-heading,
+.extraction-empty-card .section-heading {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.extraction-loading-card .section-subheading,
+.extraction-empty-card .section-subheading {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+@keyframes summaryLoadingSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .logo-badge {

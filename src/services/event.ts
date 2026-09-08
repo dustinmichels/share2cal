@@ -314,7 +314,10 @@ export function parseRecurrenceRule(rrule?: string | null): ParsedRecurrence | n
       if (num <= 0) return null;
       interval = num;
     } else if (key === "BYDAY") {
-      const tokens = val.toUpperCase().split(",").map((s) => s.trim());
+      const tokens = val
+        .toUpperCase()
+        .split(",")
+        .map((s) => s.trim());
       if (tokens.length === 0) return null;
       for (const t of tokens) {
         if (!validDays.has(t)) return null; // Reject invalid day token
@@ -396,7 +399,20 @@ export function formatRecurrenceForDisplay(rrule?: string | null): string | null
       const year = match[1];
       const monthIdx = parseInt(match[2], 10) - 1;
       const day = parseInt(match[3], 10);
-      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const monthNames = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
       desc += ` until ${monthNames[monthIdx]} ${day}, ${year}`;
     }
   }
@@ -472,7 +488,9 @@ export function generateIcsCalendarContent(event: EventDetails): string {
     // Recurring event: use floating local wall-clock datetime to preserve time across DST transitions
     const startStr = formatIcsFloatingDateTime(event.start_time, now);
     dtStart = `DTSTART:${startStr}`;
-    const endFallback = new Date((event.start_time ? new Date(event.start_time).getTime() : now.getTime()) + 3600000);
+    const endFallback = new Date(
+      (event.start_time ? new Date(event.start_time).getTime() : now.getTime()) + 3600000,
+    );
     const endStr = formatIcsFloatingDateTime(event.end_time, endFallback);
     dtEnd = `DTEND:${endStr}`;
   } else {
@@ -588,7 +606,9 @@ export function generateMultiIcsCalendarContent(events: EventDetails[]): string 
       // Recurring event: use floating local wall-clock datetime to preserve time across DST transitions
       const startStr = formatIcsFloatingDateTime(event.start_time, now);
       dtStart = `DTSTART:${startStr}`;
-      const endFallback = new Date((event.start_time ? new Date(event.start_time).getTime() : now.getTime()) + 3600000);
+      const endFallback = new Date(
+        (event.start_time ? new Date(event.start_time).getTime() : now.getTime()) + 3600000,
+      );
       const endStr = formatIcsFloatingDateTime(event.end_time, endFallback);
       dtEnd = `DTEND:${endStr}`;
     } else {

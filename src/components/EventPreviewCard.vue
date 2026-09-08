@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import {
+  extractDateInput,
   formatDateForDisplay,
   formatTimeForDisplay,
   formatRecurrenceForDisplay,
   type EventDetails,
 } from "../services/event";
+
 const props = defineProps<{
   events: EventDetails[];
   isAddingToCalendar?: boolean;
@@ -21,6 +23,20 @@ const emit = defineEmits<{
   (e: "removeEvent", index: number): void;
 }>();
 
+interface WeekPreviewEvent {
+  event: EventDetails;
+  index: number;
+  timeLabel: string;
+  recurrenceLabel: string | null;
+}
+
+interface WeekPreviewDay {
+  key: string;
+  weekdayLabel: string;
+  dateLabel: string;
+  events: WeekPreviewEvent[];
+}
+
 const eventCount = computed(() => props.events.length);
 const isMultiple = computed(() => eventCount.value > 1);
 
@@ -29,6 +45,108 @@ const overallConfidence = computed(() => {
   const sum = props.events.reduce((acc, curr) => acc + (curr.confidence || 0.8), 0);
   return Math.round((sum / props.events.length) * 100);
 });
+
+const previewMode = ref<"week" | "details">("week");
+
+const weekStartKey = computed(() => {
+  const eventDateKeys = props.events
+    .map(getEventDateKey)
+    .filter((key): key is string => Boolean(key));
+  if (eventDateKeys.length === 0) return null;
+
+  const firstEventDate = dateFromLocalKey(eventDateKeys.sort()[0]);
+  const weekStart = new Date(firstEventDate);
+  weekStart.setDate(firstEventDate.getDate() - firstEventDate.getDay());
+  return formatLocalDateKey(weekStart);
+});
+
+const weekDays = computed<WeekPreviewDay[]>(() => {
+  if (!weekStartKey.value) return [];
+
+  const weekStart = dateFromLocalKey(weekStartKey.value);
+  const days: WeekPreviewDay[] = [];
+
+  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + dayOffset);
+    days.push({
+      key: formatLocalDateKey(date),
+      weekdayLabel: date.toLocaleDateString(undefined, { weekday: "short" }),
+      dateLabel: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      events: [],
+    });
+  }
+
+  const dayByKey = new Map(days.map((day) => [day.key, day]));
+  props.events.forEach((event, index) => {
+    const eventDateKey = getEventDateKey(event);
+    const day = eventDateKey ? dayByKey.get(eventDateKey) : null;
+    if (!day) return;
+    day.events.push({
+      event,
+      index,
+      timeLabel: formatWeekEventTime(event),
+      recurrenceLabel: formatRecurrenceForDisplay(event.recurrence_rule),
+    });
+  });
+
+  for (const day of days) {
+    day.events.sort((a, b) => getEventSortValue(a.event) - getEventSortValue(b.event));
+  }
+
+  return days;
+});
+
+const weekDayKeys = computed(() => new Set(weekDays.value.map((day) => day.key)));
+
+const eventsOutsidePreviewWeek = computed(() => {
+  if (!weekStartKey.value) return 0;
+  return props.events.filter((event) => {
+    const eventDateKey = getEventDateKey(event);
+    return eventDateKey && !weekDayKeys.value.has(eventDateKey);
+  }).length;
+});
+
+const unscheduledEventCount = computed(
+  () => props.events.filter((event) => !getEventDateKey(event)).length,
+);
+
+const hasRepeatingEvents = computed(() =>
+  props.events.some((event) => Boolean(formatRecurrenceForDisplay(event.recurrence_rule))),
+);
+
+function getEventDateKey(event: EventDetails): string | null {
+  if (!event.start_time) return null;
+  return extractDateInput(event.start_time) || null;
+}
+
+function dateFromLocalKey(dateKey: string): Date {
+  return new Date(`${dateKey}T12:00:00`);
+}
+
+function formatLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getEventSortValue(event: EventDetails): number {
+  if (event.is_all_day) return -1;
+  if (!event.start_time) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(event.start_time).getTime();
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+function formatWeekEventTime(event: EventDetails): string {
+  if (event.is_all_day) return "All day";
+
+  const startTimeStr = formatTimeForDisplay(event.start_time);
+  const endTimeStr = formatTimeForDisplay(event.end_time);
+  if (startTimeStr && endTimeStr) return `${startTimeStr}–${endTimeStr}`;
+  if (startTimeStr) return startTimeStr;
+  return "Time TBD";
+}
 
 function formatEventTiming(event: EventDetails): string {
   const dateStr = formatDateForDisplay(event.start_time);
@@ -84,13 +202,106 @@ function formatEventTiming(event: EventDetails): string {
         </div>
       </div>
 
-      <div class="confidence-pill-wrap">
+      <div class="section-header-actions">
+        <div v-if="weekDays.length" class="preview-mode-toggle" aria-label="Preview mode">
+          <button
+            type="button"
+            class="preview-mode-button"
+            :class="{ active: previewMode === 'week' }"
+            @click="previewMode = 'week'"
+          >
+            Week
+          </button>
+          <button
+            type="button"
+            class="preview-mode-button"
+            :class="{ active: previewMode === 'details' }"
+            @click="previewMode = 'details'"
+          >
+            Details
+          </button>
+        </div>
         <span class="badge-pill badge-pill-confidence">{{ overallConfidence }}% match</span>
       </div>
     </div>
 
-    <!-- Events List / Grid -->
-    <div class="events-preview-list">
+    <!-- One-week calendar-style preview -->
+    <div
+      v-if="previewMode === 'week' && weekDays.length"
+      class="week-preview-card"
+      aria-label="One week calendar preview"
+    >
+      <div class="week-preview-heading">
+        <div>
+          <h3 class="week-preview-title">Week Preview</h3>
+          <p class="week-preview-subtitle">
+            A lightweight calendar view of where the event dates land.
+          </p>
+        </div>
+        <span class="badge-pill week-preview-count"
+          >{{ eventCount }} {{ eventCount === 1 ? "event" : "events" }}</span
+        >
+      </div>
+
+      <div class="week-preview-grid" role="list">
+        <section
+          v-for="day in weekDays"
+          :key="day.key"
+          class="week-day-column"
+          :class="{ 'has-events': day.events.length > 0 }"
+          role="listitem"
+        >
+          <header class="week-day-header">
+            <span class="week-day-name">{{ day.weekdayLabel }}</span>
+            <span class="week-day-date">{{ day.dateLabel }}</span>
+          </header>
+
+          <div class="week-day-events">
+            <button
+              v-for="previewEvent in day.events"
+              :key="`${day.key}-${previewEvent.index}`"
+              type="button"
+              class="week-event-block"
+              :aria-label="`Edit event: ${previewEvent.event.title || 'Untitled event'}`"
+              @click="emit('editEvent', previewEvent.index)"
+            >
+              <span class="week-event-time">{{ previewEvent.timeLabel }}</span>
+              <span class="week-event-title">{{
+                previewEvent.event.title || "Untitled Event"
+              }}</span>
+              <span v-if="previewEvent.event.location" class="week-event-location">
+                {{ previewEvent.event.location }}
+              </span>
+              <span v-if="previewEvent.recurrenceLabel" class="week-event-repeat">Repeats</span>
+            </button>
+
+            <span v-if="day.events.length === 0" class="week-empty-slot">No events</span>
+          </div>
+        </section>
+      </div>
+
+      <p
+        v-if="eventsOutsidePreviewWeek || unscheduledEventCount || hasRepeatingEvents"
+        class="week-preview-note"
+      >
+        <template v-if="eventsOutsidePreviewWeek">
+          {{ eventsOutsidePreviewWeek }}
+          {{ eventsOutsidePreviewWeek === 1 ? "event is" : "events are" }}
+          outside this preview week.
+        </template>
+        <template v-if="unscheduledEventCount">
+          {{ unscheduledEventCount }}
+          {{ unscheduledEventCount === 1 ? "event has" : "events have" }}
+          no date yet.
+        </template>
+        <template v-if="hasRepeatingEvents">
+          Repeating events are shown on their start day only.
+        </template>
+      </p>
+    </div>
+
+    <!-- Detailed events list -->
+    <div v-else class="events-preview-list">
       <div
         v-for="(event, index) in events"
         :key="index"
@@ -147,7 +358,10 @@ function formatEventTiming(event: EventDetails): string {
           </div>
 
           <!-- Recurrence row (if repeating) -->
-          <div v-if="formatRecurrenceForDisplay(event.recurrence_rule)" class="meta-row meta-row-recurrence">
+          <div
+            v-if="formatRecurrenceForDisplay(event.recurrence_rule)"
+            class="meta-row meta-row-recurrence"
+          >
             <svg
               class="meta-icon"
               viewBox="0 0 24 24"
@@ -162,7 +376,9 @@ function formatEventTiming(event: EventDetails): string {
               <polyline points="7 23 3 19 7 15"></polyline>
               <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
             </svg>
-            <span class="meta-text meta-recurrence-text">{{ formatRecurrenceForDisplay(event.recurrence_rule) }}</span>
+            <span class="meta-text meta-recurrence-text">{{
+              formatRecurrenceForDisplay(event.recurrence_rule)
+            }}</span>
           </div>
 
           <!-- Location row (if available) -->
@@ -221,7 +437,9 @@ function formatEventTiming(event: EventDetails): string {
               stroke-linejoin="round"
             >
               <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <path
+                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+              ></path>
             </svg>
           </button>
         </div>
@@ -250,9 +468,7 @@ function formatEventTiming(event: EventDetails): string {
             <polyline points="17 21 17 13 7 13 7 21"></polyline>
             <polyline points="7 3 7 8 15 8"></polyline>
           </svg>
-          <span>{{
-            isMultiple ? `Add All (${eventCount}) to Calendar` : "Add to Calendar"
-          }}</span>
+          <span>{{ isMultiple ? `Add All (${eventCount}) to Calendar` : "Add to Calendar" }}</span>
         </template>
         <template v-else>
           <div class="spinner-circle"></div>
@@ -261,11 +477,7 @@ function formatEventTiming(event: EventDetails): string {
       </button>
 
       <div class="secondary-actions-grid">
-        <button
-          type="button"
-          class="btn-touch btn-touch-outline"
-          @click="emit('exportIcs')"
-        >
+        <button type="button" class="btn-touch btn-touch-outline" @click="emit('exportIcs')">
           <svg
             class="btn-icon"
             viewBox="0 0 24 24"
@@ -370,6 +582,236 @@ function formatEventTiming(event: EventDetails): string {
   margin: 0.15rem 0 0 0;
 }
 
+.section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+}
+
+.preview-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.18rem;
+  border: 1px solid var(--border-input);
+  border-radius: 999px;
+  background: var(--bg-input);
+}
+
+.preview-mode-button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.38rem 0.55rem;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.preview-mode-button.active {
+  background: var(--bg-card);
+  color: var(--accent-primary);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.week-preview-card {
+  background: linear-gradient(180deg, var(--bg-card-elevated) 0%, var(--bg-input) 100%);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-card);
+  padding: 0.75rem;
+}
+
+.week-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.7rem;
+}
+
+.week-preview-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.week-preview-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0.15rem 0 0 0;
+  line-height: 1.35;
+}
+
+.week-preview-count {
+  background: var(--accent-primary-light);
+  color: var(--accent-primary);
+  white-space: nowrap;
+}
+
+.week-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.week-day-column {
+  min-height: 128px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card-subtle);
+  border-radius: 10px;
+  padding: 0.42rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.week-day-column.has-events {
+  border-color: rgba(0, 122, 255, 0.28);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.07);
+}
+
+.week-day-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.week-day-name {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--text-tertiary);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.week-day-date {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.15;
+}
+
+.week-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.week-event-block {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 8px;
+  background: var(--accent-primary-light);
+  color: var(--text-primary);
+  padding: 0.38rem 0.42rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.week-event-block:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgba(0, 122, 255, 0.12);
+}
+
+.week-event-time {
+  font-size: 0.56rem;
+  font-weight: 800;
+  color: var(--accent-primary);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.week-event-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.week-event-location {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-event-repeat {
+  align-self: flex-start;
+  margin-top: 0.1rem;
+  font-size: 0.56rem;
+  font-weight: 800;
+  color: #8a5a00;
+  background: rgba(255, 204, 0, 0.28);
+  border-radius: 999px;
+  padding: 0.1rem 0.3rem;
+}
+
+.week-empty-slot {
+  margin-top: auto;
+  font-size: 0.62rem;
+  color: var(--text-tertiary);
+  line-height: 1.2;
+}
+
+.week-preview-note {
+  margin: 0.7rem 0 0 0;
+  font-size: 0.74rem;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .week-event-repeat {
+    color: #ffd60a;
+    background: rgba(255, 214, 10, 0.16);
+  }
+}
+
+@media (max-width: 430px) {
+  .section-header {
+    align-items: flex-start;
+  }
+
+  .section-header-actions {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+  }
+
+  .week-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .week-day-column {
+    min-height: auto;
+  }
+}
+
 .events-preview-list {
   display: flex;
   flex-direction: column;
@@ -461,7 +903,9 @@ function formatEventTiming(event: EventDetails): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s ease, transform 0.15s ease;
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .event-preview-item:hover .edit-cue-btn {

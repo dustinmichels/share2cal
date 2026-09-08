@@ -37,7 +37,7 @@ Google accounts synced to macOS/iOS via **System Settings → Internet Accounts*
      [store requestWriteOnlyAccessToEventsWithCompletion:...]
      ```
    - **Constraint**: Apple's write-only access sandbox forbids reading or enumerating existing calendars (`[store calendarsForEntityType:EKEntityTypeEvent]` returns an empty array).
-   - **Alignment with Original Architecture**: `plan.md` Phase 4 already originally specified *"iOS: Request EKEntityType.event full access permissions via Info.plist"*. The shipped write-only implementation was a drift from the initial design; switching to full access is a return to original intent.
+   - **Alignment with Original Architecture**: `plan.md` Phase 4 already originally specified _"iOS: Request EKEntityType.event full access permissions via Info.plist"_. The shipped write-only implementation was a drift from the initial design; switching to full access is a return to original intent.
    - **Change needed**:
      - Switch to `requestFullAccessToEventsWithCompletion:` on iOS 17+ / macOS 14+ (and `requestAccessToEntityType:EKEntityTypeEvent` on older versions).
      - Add `NSCalendarsFullAccessUsageDescription` to `src-tauri/gen/apple/share2cal_iOS/Info.plist` and `src-tauri/gen/apple/project.yml`.

@@ -100,7 +100,9 @@ describe("Event Service & Multi-Event ICS Generation", () => {
 
     // Verify presence of event titles
     expect(icsContent).toContain("SUMMARY:CEE 0154-03 Principles Epidemiology (Lecture)");
-    expect(icsContent).toContain("SUMMARY:CS 0150-09 Special Topics - Analysis Mthds Images\\, Text & (Lecture)");
+    expect(icsContent).toContain(
+      "SUMMARY:CS 0150-09 Special Topics - Analysis Mthds Images\\, Text & (Lecture)",
+    );
     expect(icsContent).toContain("SUMMARY:CSHD 0166-01 Children's Play (Lecture)");
     expect(icsContent).toContain("SUMMARY:CSHD 0167-01 Children & Media (Lecture)");
     expect(icsContent).toContain("SUMMARY:UEP 0254-01 Quantitative Reasoning (Lecture)");
@@ -154,14 +156,18 @@ describe("Event Service & Multi-Event ICS Generation", () => {
   });
 
   it("formats recurrence rules into human-readable text", () => {
-    expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z")).toBe("Repeats: Mon, Wed until Dec 18, 2026");
+    expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z")).toBe(
+      "Repeats: Mon, Wed until Dec 18, 2026",
+    );
     expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=TU,TH")).toBe("Repeats: Tue, Thu");
     expect(formatRecurrenceForDisplay("FREQ=DAILY")).toBe("Repeats daily");
     expect(formatRecurrenceForDisplay(null)).toBeNull();
   });
 
   it("parses and builds typed recurrence rules with end-of-day inclusive UNTIL", () => {
-    const parsedFromPicker = parseRecurrenceRule("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=2026-12-18");
+    const parsedFromPicker = parseRecurrenceRule(
+      "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=2026-12-18",
+    );
     expect(parsedFromPicker).not.toBeNull();
     expect(parsedFromPicker!.frequency).toBe("WEEKLY");
     expect(parsedFromPicker!.interval).toBe(2);

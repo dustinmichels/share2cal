@@ -35,7 +35,7 @@ const parsedRecurrence = ref<ParsedRecurrence>(
     byDays: [],
     until: null,
     count: null,
-  }
+  },
 );
 
 const repeatDays = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
@@ -75,7 +75,7 @@ watch(
       const parsed = parseRecurrenceRule(newVal);
       if (parsed) parsedRecurrence.value = parsed;
     }
-  }
+  },
 );
 
 watch(isRepeating, (newVal) => {
@@ -388,11 +388,7 @@ watch(isRepeating, (newVal) => {
       </div>
 
       <div v-if="totalEvents && totalEvents > 1" class="delete-action-row">
-        <button
-          type="button"
-          class="btn-delete-event"
-          @click="emit('remove')"
-        >
+        <button type="button" class="btn-delete-event" @click="emit('remove')">
           <svg
             class="delete-icon"
             viewBox="0 0 24 24"
@@ -403,7 +399,9 @@ watch(isRepeating, (newVal) => {
             stroke-linejoin="round"
           >
             <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <path
+              d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+            ></path>
           </svg>
           <span>Remove this event from list</span>
         </button>
