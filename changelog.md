@@ -40,6 +40,11 @@
 - **Tauri IPC & Client Services**:
 - Registered IPC commands for model management (`get_model_manifest`, `get_model_statuses`, `get_model_status`, `download_model`, `cancel_model_download`, `delete_model`, `verify_model_hash`, `get_models_storage_info`) and inference (`extract_event_with_model`, `cancel_inference`).
 - Added typed TypeScript wrappers in `src/services/model.ts`, `src/services/event.ts`, and `src/services/settings.ts`.
+- Added native calendar integration and management commands (`list_calendars`, `create_calendar_event`, `create_calendar_events`, `delete_calendar_event`) for EventKit and native calendar sources
+- Added robust iOS/macOS EventKit calendar bindings and Objective-C bridge methods supporting target calendar selection, recurring rules, and batch event creation
+- Added comprehensive test suite for calendar services and event parsing (`tests/calendar.test.ts`, `tests/event.test.ts`)
 
 ### Changed
 - Refined event preview workflow and form handling in App.vue and EventPreviewCard
+- Updated parser and inference pipeline for enhanced multi-event extraction and robustness
+- Updated UI components (`EventFormCard.vue`, `EventPreviewCard.vue`, `SettingsView.vue`) and Tauri IPC bindings (`src/services/calendar.ts`, `src/services/settings.ts`) with advanced calendar settings and event preview workflows
