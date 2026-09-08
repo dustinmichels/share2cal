@@ -81,7 +81,50 @@ fn test_create_calendar_event_invalid_recurrence_rule() {
 }
 
 #[test]
+fn test_mock_calendar_is_active_during_integration_tests() {
+    assert!(
+        is_mock_calendar_active(),
+        "Mock calendar must always be active during integration tests"
+    );
+}
+static TEST_CALENDAR_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+
+#[test]
+fn test_create_calendar_event_mock_isolation_prevents_real_calendar_writes() {
+    let _guard = TEST_CALENDAR_MUTEX.lock();
+    clear_mock_created_events();
+    let valid_event = EventDetails {
+        title: "Integration Test Valid Event".to_string(),
+        start_time: Some("2026-09-06T14:00:00Z".to_string()),
+        end_time: Some("2026-09-06T15:00:00Z".to_string()),
+        is_all_day: false,
+        location: Some("Test Lab".to_string()),
+        description: Some("Integration test event for mock calendar isolation".to_string()),
+        recurrence_rule: None,
+        confidence: 0.95,
+        source: "test".to_string(),
+    };
+
+    let result = create_calendar_event(valid_event, None, None, None);
+    assert!(result.is_ok(), "Creating valid event in test should succeed via mock");
+    let event_id = result.unwrap();
+    assert!(
+        event_id.starts_with("mock_event_"),
+        "Event ID must be a mock event ID, got: {}",
+        event_id
+    );
+
+    let recorded = get_mock_created_events();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].event.title, "Integration Test Valid Event");
+    clear_mock_created_events();
+}
+
+#[test]
 fn test_create_calendar_events_batch_validation() {
+    let _guard = TEST_CALENDAR_MUTEX.lock();
+    clear_mock_created_events();
     let valid_event = EventDetails {
         title: "Valid Event".to_string(),
         start_time: Some("2026-09-06T14:00:00Z".to_string()),
@@ -108,6 +151,15 @@ fn test_create_calendar_events_batch_validation() {
     let result = create_calendar_events(vec![valid_event, invalid_event], None, None, None);
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "Event title cannot be empty.");
+
+    // Prevalidation guarantees that zero events were created on batch error
+    let recorded = get_mock_created_events();
+    assert_eq!(
+        recorded.len(),
+        0,
+        "No events should be created when batch validation fails"
+    );
+    clear_mock_created_events();
 }
 
 #[test]

@@ -99,7 +99,24 @@ pub mod test_support {
         commands::load_image_from_path(path)
     }
 
+    pub fn ensure_mock_calendar() {
+        calendar::set_mock_mode(true);
+    }
+
+    pub fn is_mock_calendar_active() -> bool {
+        calendar::is_mock_active()
+    }
+
+    pub fn get_mock_created_events() -> Vec<calendar::mock::MockCreatedEvent> {
+        calendar::mock::get_created_events()
+    }
+
+    pub fn clear_mock_created_events() {
+        calendar::mock::clear_created_events();
+    }
+
     pub fn get_available_calendars() -> Result<Vec<calendar::CalendarInfo>, AppError> {
+        ensure_mock_calendar();
         commands::get_available_calendars()
     }
 
@@ -109,6 +126,7 @@ pub mod test_support {
         calendar_title: Option<String>,
         calendar_source_title: Option<String>,
     ) -> Result<String, AppError> {
+        ensure_mock_calendar();
         commands::create_calendar_event(event, calendar_id, calendar_title, calendar_source_title)
     }
 
@@ -118,14 +136,17 @@ pub mod test_support {
         calendar_title: Option<String>,
         calendar_source_title: Option<String>,
     ) -> Result<Vec<String>, AppError> {
+        ensure_mock_calendar();
         commands::create_calendar_events(events, calendar_id, calendar_title, calendar_source_title)
     }
 
     pub fn check_calendar_permission() -> Result<String, AppError> {
+        ensure_mock_calendar();
         commands::check_calendar_permission()
     }
 
     pub fn request_calendar_permission() -> Result<bool, AppError> {
+        ensure_mock_calendar();
         commands::request_calendar_permission()
     }
 

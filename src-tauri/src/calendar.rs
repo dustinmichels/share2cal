@@ -309,19 +309,177 @@ mod fallback {
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use apple::*;
+use apple as native;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-pub use fallback::*;
+use fallback as native;
 
-/// Batch helper to create multiple calendar events
+pub mod mock {
+    use super::*;
+    use parking_lot::RwLock;
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    pub struct MockCreatedEvent {
+        pub id: String,
+        pub event: EventDetails,
+        pub calendar_id: Option<String>,
+        pub calendar_title: Option<String>,
+        pub calendar_source_title: Option<String>,
+    }
+
+    static MOCK_EVENTS: RwLock<Vec<MockCreatedEvent>> = RwLock::new(Vec::new());
+
+    pub fn get_created_events() -> Vec<MockCreatedEvent> {
+        MOCK_EVENTS.read().clone()
+    }
+
+    pub fn clear_created_events() {
+        MOCK_EVENTS.write().clear();
+    }
+
+    pub fn check_permission() -> Result<String, AppError> {
+        Ok("authorized".to_string())
+    }
+
+    pub fn request_permission() -> Result<bool, AppError> {
+        Ok(true)
+    }
+
+    pub fn list_calendars() -> Result<Vec<CalendarInfo>, AppError> {
+        Ok(vec![
+            CalendarInfo {
+                id: "mock_default".to_string(),
+                title: "Personal".to_string(),
+                source_title: "iCloud".to_string(),
+                color: "#4285F4".to_string(),
+                is_default: true,
+                allows_modifications: true,
+            },
+            CalendarInfo {
+                id: "mock_work".to_string(),
+                title: "Work".to_string(),
+                source_title: "Work Account".to_string(),
+                color: "#10B981".to_string(),
+                is_default: false,
+                allows_modifications: true,
+            },
+        ])
+    }
+
+    pub fn create_event(
+        event: &EventDetails,
+        calendar_id: Option<&str>,
+        calendar_title: Option<&str>,
+        calendar_source_title: Option<&str>,
+    ) -> Result<String, AppError> {
+        let trimmed_title = event.title.trim();
+        if trimmed_title.is_empty() {
+            return Err(AppError::Calendar("Event title cannot be empty.".to_string()));
+        }
+
+        if let Some(rrule) = event.recurrence_rule.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            crate::parser::RecurrenceRule::parse_rrule(rrule)
+                .map_err(|e| AppError::Calendar(format!("Invalid recurrence rule: {}", e)))?;
+        }
+
+        let mut events = MOCK_EVENTS.write();
+        let event_id = format!("mock_event_{}_{}", trimmed_title.replace(' ', "_"), events.len() + 1);
+        events.push(MockCreatedEvent {
+            id: event_id.clone(),
+            event: event.clone(),
+            calendar_id: calendar_id.map(str::to_string),
+            calendar_title: calendar_title.map(str::to_string),
+            calendar_source_title: calendar_source_title.map(str::to_string),
+        });
+        Ok(event_id)
+    }
+}
+
+static MOCK_OVERRIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_mock_mode(enabled: bool) {
+    MOCK_OVERRIDE.store(enabled, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn is_mock_active() -> bool {
+    if MOCK_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
+    if cfg!(test) {
+        return true;
+    }
+    if let Ok(val) = std::env::var("SHARE2CAL_MOCK_CALENDAR") {
+        if val != "0" && !val.eq_ignore_ascii_case("false") {
+            return true;
+        }
+    }
+    if std::env::var("RUST_TEST_NOCAPTURE").is_ok() {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_str = exe.to_string_lossy();
+        if exe_str.contains("/target/") && (exe_str.contains("/deps/") || exe_str.contains("test")) {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn check_permission() -> Result<String, AppError> {
+    if is_mock_active() {
+        return mock::check_permission();
+    }
+    native::check_permission()
+}
+
+pub fn request_permission() -> Result<bool, AppError> {
+    if is_mock_active() {
+        return mock::request_permission();
+    }
+    native::request_permission()
+}
+
+pub fn list_calendars() -> Result<Vec<CalendarInfo>, AppError> {
+    if is_mock_active() {
+        return mock::list_calendars();
+    }
+    native::list_calendars()
+}
+
+pub fn create_event(
+    event: &EventDetails,
+    calendar_id: Option<&str>,
+    calendar_title: Option<&str>,
+    calendar_source_title: Option<&str>,
+) -> Result<String, AppError> {
+    if is_mock_active() {
+        return mock::create_event(event, calendar_id, calendar_title, calendar_source_title);
+    }
+    native::create_event(event, calendar_id, calendar_title, calendar_source_title)
+}
+
+/// Batch helper to create multiple calendar events.
+/// Pre-validates all events to ensure none are created if any event is invalid.
 pub fn create_events(
     events: &[EventDetails],
     calendar_id: Option<&str>,
     calendar_title: Option<&str>,
     calendar_source_title: Option<&str>,
 ) -> Result<Vec<String>, AppError> {
-    let mut event_ids = Vec::new();
+    // 1. Pre-validate all events before creating any
+    for event in events {
+        let trimmed_title = event.title.trim();
+        if trimmed_title.is_empty() {
+            return Err(AppError::Calendar("Event title cannot be empty.".to_string()));
+        }
+
+        if let Some(rrule) = event.recurrence_rule.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            crate::parser::RecurrenceRule::parse_rrule(rrule)
+                .map_err(|e| AppError::Calendar(format!("Invalid recurrence rule: {}", e)))?;
+        }
+    }
+
+    // 2. Create each event
+    let mut event_ids = Vec::with_capacity(events.len());
     for event in events {
         let id = create_event(event, calendar_id, calendar_title, calendar_source_title)?;
         event_ids.push(id);
@@ -454,5 +612,76 @@ mod tests {
     fn test_list_calendars_returns_result() {
         let cals = list_calendars();
         assert!(cals.is_ok());
+    }
+
+    #[test]
+    fn test_mock_mode_active_in_unit_tests() {
+        assert!(is_mock_active(), "Mock mode must be active during tests");
+    }
+    static TEST_CALENDAR_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+
+    #[test]
+    fn test_create_event_valid_mock_isolation() {
+        let _guard = TEST_CALENDAR_MUTEX.lock();
+        mock::clear_created_events();
+        let event = EventDetails {
+            title: "Test Isolation Event".to_string(),
+            start_time: Some("2026-09-06T14:00:00Z".to_string()),
+            end_time: Some("2026-09-06T15:00:00Z".to_string()),
+            is_all_day: false,
+            location: Some("Virtual".to_string()),
+            description: Some("Test description".to_string()),
+            recurrence_rule: None,
+            confidence: 0.95,
+            source: "test".to_string(),
+        };
+
+        let result = create_event(&event, None, None, None);
+        assert!(result.is_ok(), "Creating valid event in mock mode should succeed");
+        let event_id = result.unwrap();
+        assert!(event_id.starts_with("mock_event_"), "Event ID should be a mock ID");
+
+        let created = mock::get_created_events();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].event.title, "Test Isolation Event");
+        mock::clear_created_events();
+    }
+
+    #[test]
+    fn test_create_events_batch_prevalidation_atomicity() {
+        let _guard = TEST_CALENDAR_MUTEX.lock();
+        mock::clear_created_events();
+        let valid_event = EventDetails {
+            title: "Valid Batch Event".to_string(),
+            start_time: Some("2026-09-06T14:00:00Z".to_string()),
+            end_time: Some("2026-09-06T15:00:00Z".to_string()),
+            is_all_day: false,
+            location: None,
+            description: None,
+            recurrence_rule: None,
+            confidence: 0.95,
+            source: "test".to_string(),
+        };
+        let invalid_event = EventDetails {
+            title: "".to_string(),
+            start_time: Some("2026-09-06T14:00:00Z".to_string()),
+            end_time: Some("2026-09-06T15:00:00Z".to_string()),
+            is_all_day: false,
+            location: None,
+            description: None,
+            recurrence_rule: None,
+            confidence: 0.95,
+            source: "test".to_string(),
+        };
+
+        let result = create_events(&[valid_event, invalid_event], None, None, None);
+        assert!(result.is_err(), "Batch with invalid event should be rejected");
+        assert_eq!(result.unwrap_err(), "Event title cannot be empty.");
+
+        // Prevalidation ensures the first valid event was never created
+        let created = mock::get_created_events();
+        assert_eq!(created.len(), 0, "No event should have been created on batch validation failure");
+        mock::clear_created_events();
     }
 }
