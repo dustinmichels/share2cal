@@ -365,8 +365,56 @@ pub fn parse_llm_json_payload(raw_json: &str) -> Option<Vec<EventDetails>> {
             }
         }
     }
+    // 4. Resilient field-level extraction for malformed or unescaped quotes in LLM output
+    let loose_events = extract_events_from_loose_llm_json(trimmed);
+    if !loose_events.is_empty() {
+        return Some(loose_events);
+    }
 
     None
+}
+
+fn extract_events_from_loose_llm_json(raw: &str) -> Vec<EventDetails> {
+    let mut events = Vec::new();
+    let title_re = regex::Regex::new(r#""title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).unwrap();
+    let start_time_re = regex::Regex::new(r#""start_time"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
+    let end_time_re = regex::Regex::new(r#""end_time"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
+    let is_all_day_re = regex::Regex::new(r#""is_all_day"\s*:\s*(true|false)"#).unwrap();
+    let location_re = regex::Regex::new(r#""location"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
+    let recurrence_re = regex::Regex::new(r#""recurrence_rule"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
+
+    for block in raw.split('{') {
+        if let Some(t_cap) = title_re.captures(block) {
+            let title = t_cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            if title.trim().is_empty() {
+                continue;
+            }
+
+            let start_time = start_time_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+            let end_time = end_time_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+            let is_all_day = is_all_day_re.captures(block).map(|c| c.get(1).unwrap().as_str() == "true").unwrap_or(false);
+            let location = location_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+            let recurrence_rule = recurrence_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+
+            let event = EventDetails {
+                title,
+                start_time,
+                end_time,
+                is_all_day,
+                location,
+                description: None,
+                recurrence_rule,
+                confidence: 0.95,
+                source: "llm".to_string(),
+            };
+
+            if !events.contains(&event) {
+                events.push(event);
+            }
+        }
+    }
+
+    events
 }
 
 /// Orchestrates multi-event extraction using local LLM inference with dynamic context injection,

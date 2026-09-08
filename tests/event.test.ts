@@ -14,323 +14,378 @@ import {
 } from "../src/services/event";
 import parsedManifest from "../samples/parsed.json";
 
-describe("Event Service & Multi-Event ICS Generation (using samples/parsed.json)", () => {
-  // Load source of truth directly from samples/parsed.json
-  const sampleEvents: EventDetails[] = (
-    parsedManifest["samples/classes.png"] as Array<Record<string, unknown>>
-  ).map((e) => ({
-    title: String(e.title),
-    start_time: (e.start_time as string) ?? null,
-    end_time: (e.end_time as string) ?? null,
-    is_all_day: Boolean(e.is_all_day),
-    location: (e.location as string) ?? null,
-    description: (e.description as string) ?? null,
-    recurrence_rule: (e.recurrence_rule as string) ?? null,
-    confidence: 0.95,
-    source: "deterministic_schedule",
-  }));
+export interface ParsedJsonEntry {
+  title: string;
+  date: string | null;
+  days: string[] | null;
+  start_time: string | null;
+  end_time: string | null;
+  is_all_day: boolean;
+  repeating?: boolean;
+  location: string | null;
+  description: string | null;
+}
 
-  const gilmanFlyerEvent: EventDetails = {
-    ...(parsedManifest["samples/gilman_flyer.png"][0] as EventDetails),
-    confidence: 0.95,
-    source: "deterministic_flyer",
+function parseTimeTo24h(timeStr: string | null | undefined): string | null {
+  if (!timeStr) return null;
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = match[2];
+  const ampm = match[3]?.toUpperCase();
+  if (ampm === "PM" && hour < 12) hour += 12;
+  else if (ampm === "AM" && hour === 12) hour = 0;
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+}
+
+function convertDayNamesToByDay(days: string[] | null | undefined): string[] {
+  if (!days || days.length === 0) return [];
+  const map: Record<string, string> = {
+    monday: "MO",
+    mon: "MO",
+    mo: "MO",
+    tuesday: "TU",
+    tue: "TU",
+    tu: "TU",
+    wednesday: "WE",
+    wed: "WE",
+    we: "WE",
+    thursday: "TH",
+    thu: "TH",
+    th: "TH",
+    friday: "FR",
+    fri: "FR",
+    fr: "FR",
+    saturday: "SA",
+    sat: "SA",
+    sa: "SA",
+    sunday: "SU",
+    sun: "SU",
+    su: "SU",
   };
+  return days.map((d) => map[d.toLowerCase()] || d).filter(Boolean);
+}
 
-  const instagramIceCreamSocialEvent: EventDetails = {
-    ...(parsedManifest["samples/instagram.png"][0] as EventDetails),
-    confidence: 0.95,
-    source: "deterministic_flyer",
+function getUpcomingWeekdayDate(dayName: string, refDateStr = "2026-09-06"): string {
+  const dayMap: Record<string, number> = {
+    sunday: 0,
+    su: 0,
+    monday: 1,
+    mo: 1,
+    tuesday: 2,
+    tu: 2,
+    wednesday: 3,
+    we: 3,
+    thursday: 4,
+    th: 4,
+    friday: 5,
+    fr: 5,
+    saturday: 6,
+    sa: 6,
   };
+  const targetDay = dayMap[dayName.toLowerCase()] ?? 1;
+  const d = new Date(refDateStr + "T12:00:00Z");
+  const currentDay = d.getUTCDay();
+  let diff = targetDay - currentDay;
+  if (diff <= 0) diff += 7;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().split("T")[0];
+}
 
-  const squirrelFlowerEvent: EventDetails = {
-    ...(parsedManifest["samples/squirrel_flower.jpg"][0] as EventDetails),
+function parsedJsonEntryToEventDetails(raw: ParsedJsonEntry, refDate = "2026-09-06"): EventDetails {
+  const isAllDay = raw.is_all_day;
+  const byDays = convertDayNamesToByDay(raw.days);
+  const isRepeating = Boolean(raw.repeating || byDays.length > 0);
+  const startTime24 = parseTimeTo24h(raw.start_time);
+  const endTime24 = parseTimeTo24h(raw.end_time);
+
+  let dateStr = raw.date;
+  if (!dateStr && byDays.length > 0 && raw.days && raw.days.length > 0) {
+    dateStr = getUpcomingWeekdayDate(raw.days[0], refDate);
+  }
+
+  let startTimeIso: string | null = null;
+  let endTimeIso: string | null = null;
+
+  if (isAllDay) {
+    startTimeIso = raw.date || refDate;
+    endTimeIso = raw.date || refDate;
+  } else if (dateStr && startTime24) {
+    startTimeIso = `${dateStr}T${startTime24}:00Z`;
+    endTimeIso = endTime24 ? `${dateStr}T${endTime24}:00Z` : `${dateStr}T${startTime24}:00Z`;
+  }
+
+  let recurrenceRule: string | null = null;
+  if (isRepeating && byDays.length > 0) {
+    recurrenceRule = `FREQ=WEEKLY;BYDAY=${byDays.join(",")};UNTIL=20261218T235959Z`;
+  }
+
+  return {
+    title: raw.title,
+    start_time: startTimeIso,
+    end_time: endTimeIso,
+    is_all_day: isAllDay,
+    location: raw.location ?? null,
+    description: raw.description ?? null,
+    recurrence_rule: recurrenceRule,
     confidence: 0.95,
-    source: "deterministic_flyer",
+    source: isRepeating ? "deterministic_schedule" : "deterministic_flyer",
   };
+}
 
-  const rideForLifeEvent: EventDetails = {
-    ...(parsedManifest["samples/ride_for_life.png"][0] as EventDetails),
-    confidence: 0.95,
-    source: "deterministic_flyer",
-  };
+describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json)", () => {
+  const samplesManifest = parsedManifest as Record<string, ParsedJsonEntry[]>;
 
-  it("generates a multi-event RFC 5545 iCalendar (.ics) string with 6 distinct VEVENT blocks", () => {
-    const icsContent = generateMultiIcsCalendarContent(sampleEvents);
+  const classEntries = samplesManifest["samples/class.png"];
+  const classesEntries = samplesManifest["samples/classes.png"];
+  const gilmanFlyerEntries = samplesManifest["samples/gilman_flyer.png"];
+  const instagramEntries = samplesManifest["samples/instagram.png"];
+  const rideForLifeEntries = samplesManifest["samples/ride_for_life.png"];
+  const squirrelFlowerEntries = samplesManifest["samples/squirrel_flower.jpg"];
 
-    expect(icsContent).toStartWith("BEGIN:VCALENDAR");
-    expect(icsContent).toEndWith("END:VCALENDAR");
-
-    // Count occurrences of BEGIN:VEVENT and END:VEVENT
-    const beginMatches = icsContent.match(/BEGIN:VEVENT/g);
-    const endMatches = icsContent.match(/END:VEVENT/g);
-
-    expect(beginMatches).not.toBeNull();
-    expect(beginMatches!.length).toBe(6);
-    expect(endMatches).not.toBeNull();
-    expect(endMatches!.length).toBe(6);
-
-    // Verify presence of event titles from parsed.json
-    expect(icsContent).toContain("SUMMARY:CEE 0154-03 (80513) Principles Epidemiology (Lecture)");
-    expect(icsContent).toContain(
-      "SUMMARY:CS 0150-09 (84779) Special Topics - Analysis Mthds Images\\, Text & (Lecture)",
-    );
-    expect(icsContent).toContain("SUMMARY:CSHD 0166-01 (82454) Children's Play (Lecture)");
-    expect(icsContent).toContain("SUMMARY:CSHD 0167-01 (80739) Children & Media (Lecture)");
-    expect(icsContent).toContain("SUMMARY:UEP 0254-01 (81300) Quantitative Reasoning (Lecture)");
-    expect(icsContent).toContain(
-      "SUMMARY:UEP 0262-01 (82571) Solidarity Economy Movements (Seminar)",
-    );
-
-    // Verify locations and descriptions from parsed.json
-    expect(icsContent).toContain("LOCATION:Anderson Wing TTC\\, Room 306");
-    expect(icsContent).toContain("LOCATION:Online");
-
-    // Verify RRULE presence in multi-event ICS
-    expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z");
-    expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261218T235959Z");
-    expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=FR;UNTIL=20261218T235959Z");
-    expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TH;UNTIL=20261218T235959Z");
-    expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261218T235959Z");
+  it("loads all 6 sample image ground truths from samples/parsed.json", () => {
+    expect(classEntries.length).toBe(1);
+    expect(classesEntries.length).toBe(6);
+    expect(gilmanFlyerEntries.length).toBe(1);
+    expect(instagramEntries.length).toBe(1);
+    expect(rideForLifeEntries.length).toBe(1);
+    expect(squirrelFlowerEntries.length).toBe(1);
   });
 
-  it("handles recurring relative weekday calculations starting on the next upcoming matching weekday", () => {
-    /**
-     * COMPLEXITY / SPECIFICATION NOTE:
-     * When parsing recurring schedules (like class schedules "Mo, We 3:00 PM - 4:15 PM") without
-     * an absolute calendar year/date in the image, the event is defined to repeat weekly starting
-     * on the NEXT matching weekday relative to WHEN the code is run (or reference context).
-     *
-     * If the tests are run on a different date (e.g. next week or next month):
-     * - The start and end calendar dates (YYYY-MM-DD) will advance to the next upcoming weekdays.
-     * - The start time-of-day (15:00), end time-of-day (16:15), duration (75m), and recurrence rule (BYDAY=MO,WE)
-     *   remain strictly identical.
-     */
-    const mondayClass = sampleEvents[0]; // CEE 0154-03
-    expect(mondayClass.recurrence_rule).toContain("BYDAY=MO,WE");
-    expect(mondayClass.is_all_day).toBe(false);
+  describe("Multi-Event & Single-Event ICS Generation from parsed.json", () => {
+    it("generates a multi-event RFC 5545 iCalendar (.ics) string for classes.png with 6 distinct VEVENT blocks", () => {
+      const sampleEvents: EventDetails[] = classesEntries.map((e) =>
+        parsedJsonEntryToEventDetails(e),
+      );
+      const icsContent = generateMultiIcsCalendarContent(sampleEvents);
 
-    const startTimeInput = extractTimeInput(mondayClass.start_time);
-    expect(startTimeInput).toBe("15:00");
-    const endTimeInput = extractTimeInput(mondayClass.end_time);
-    expect(endTimeInput).toBe("16:15");
+      expect(icsContent).toStartWith("BEGIN:VCALENDAR");
+      expect(icsContent).toEndWith("END:VCALENDAR");
+
+      const beginMatches = icsContent.match(/BEGIN:VEVENT/g);
+      const endMatches = icsContent.match(/END:VEVENT/g);
+
+      expect(beginMatches).not.toBeNull();
+      expect(beginMatches!.length).toBe(6);
+      expect(endMatches).not.toBeNull();
+      expect(endMatches!.length).toBe(6);
+
+      // Verify titles from parsed.json
+      expect(icsContent).toContain("SUMMARY:CEE 0154-03 (80513) Principles Epidemiology (Lecture)");
+      expect(icsContent).toContain(
+        "SUMMARY:CS 0150-09 (84779) Special Topics - Analysis Mthds Images\\, Text & (Lecture)",
+      );
+      expect(icsContent).toContain("SUMMARY:CSHD 0166-01 (82454) Children's Play (Lecture)");
+      expect(icsContent).toContain("SUMMARY:CSHD 0167-01 (80739) Children & Media (Lecture)");
+      expect(icsContent).toContain("SUMMARY:UEP 0254-01 (81300) Quantitative Reasoning (Lecture)");
+      expect(icsContent).toContain(
+        "SUMMARY:UEP 0262-01 (82571) Solidarity Economy Movements (Seminar)",
+      );
+
+      // Verify locations from parsed.json
+      expect(icsContent).toContain("LOCATION:Anderson Wing TTC\\, Room 306");
+      expect(icsContent).toContain("LOCATION:Online");
+      expect(icsContent).toContain("LOCATION:Eliot-Pearson\\, Room 157");
+      expect(icsContent).toContain("LOCATION:Eaton Hall\\, 201");
+      expect(icsContent).toContain("LOCATION:Joyce Cummings Center\\, 302");
+      expect(icsContent).toContain("LOCATION:Bromfield-Pearson\\, Room 006");
+
+      // Verify RRULE presence in multi-event ICS
+      expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z");
+      expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261218T235959Z");
+      expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=FR;UNTIL=20261218T235959Z");
+      expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TH;UNTIL=20261218T235959Z");
+      expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261218T235959Z");
+    });
+
+    it("generates single event ICS correctly for class.png (CVS-0188 Seminar)", () => {
+      const event = parsedJsonEntryToEventDetails(classEntries[0]);
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("SUMMARY:CVS-0188 Children and Media Seminar");
+      expect(ics).toContain("LOCATION:Eliot-Pearson\\, Room 157");
+      expect(ics).toContain("RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261218T235959Z");
+    });
+
+    it("generates single event ICS correctly for Gilman Square Arts & Music Festival flyer sample", () => {
+      const event = parsedJsonEntryToEventDetails(gilmanFlyerEntries[0]);
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("BEGIN:VEVENT");
+      expect(ics).toContain("END:VEVENT");
+      expect(ics).toContain("SUMMARY:SomerStreets Gilman Square Arts & Music Festival");
+      expect(ics).toContain("LOCATION:Ed Leathers Park\\, Walnut Street and Skilton Ave");
+      expect(ics).toContain("STATUS:CONFIRMED");
+      expect(ics).toContain("DTSTART:20260912T120000Z");
+      expect(ics).toContain("DTEND:20260912T170000Z");
+    });
+
+    it("generates single event ICS correctly for UEP Ice Cream Social Instagram sample", () => {
+      const event = parsedJsonEntryToEventDetails(instagramEntries[0]);
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("SUMMARY:UEP ICE CREAM SOCIAL");
+      expect(ics).toContain("LOCATION:BP Lawn");
+      expect(ics).toContain("DTSTART:20260909T120000Z");
+      expect(ics).toContain("DTEND:20260909T130000Z");
+    });
+
+    it("generates single event ICS correctly for Squirrel Flower concert tour flyer sample", () => {
+      const event = parsedJsonEntryToEventDetails(squirrelFlowerEntries[0]);
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("SUMMARY:Squirrel Flower – 2026 Tour (with youbet)");
+      expect(ics).toContain("LOCATION:Crystal Ballroom\\, Somerville\\, MA");
+      expect(ics).toContain("DTSTART;VALUE=DATE:20260926");
+      expect(ics).toContain("DTEND;VALUE=DATE:20260926");
+    });
+
+    it("generates single event ICS correctly for Ride For Your Life advocacy event sample", () => {
+      const event = parsedJsonEntryToEventDetails(rideForLifeEntries[0]);
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("SUMMARY:Ride For Your Life");
+      expect(ics).toContain("LOCATION:Boston\\, MA");
+      expect(ics).toContain("DTSTART;VALUE=DATE:20261025");
+      expect(ics).toContain("DTEND;VALUE=DATE:20261025");
+    });
   });
 
-  it("generates single event ICS correctly for Gilman Square Arts & Music Festival flyer sample", () => {
-    const ics = generateIcsCalendarContent(gilmanFlyerEvent);
-    expect(ics).toStartWith("BEGIN:VCALENDAR");
-    expect(ics).toEndWith("END:VCALENDAR");
-    expect(ics).toContain("BEGIN:VEVENT");
-    expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:SomerStreets Gilman Square Arts & Music Festival");
-    expect(ics).toContain(
-      "LOCATION:Ed Leathers Park\\, Walnut Street and Skilton Ave\\, Somerville\\, MA",
-    );
-    expect(ics).toContain("STATUS:CONFIRMED");
-    expect(ics).toContain("DTSTART:20260912T160000Z");
-    expect(ics).toContain("DTEND:20260912T210000Z");
-  });
+  describe("Formatting & Date/Time Form Helpers", () => {
+    it("extracts and formats date and time values accurately for Gilman Square flyer event", () => {
+      const event = parsedJsonEntryToEventDetails(gilmanFlyerEntries[0]);
+      const dateInput = extractDateInput(event.start_time);
+      expect(dateInput).toBe("2026-09-12");
 
-  it("extracts and formats date and time values accurately for Gilman Square flyer event", () => {
-    const dateInput = extractDateInput(gilmanFlyerEvent.start_time);
-    expect(dateInput).toBe("2026-09-12");
+      const startTimeInput = extractTimeInput(event.start_time);
+      expect(startTimeInput).toBe("12:00");
 
-    const startTimeInput = extractTimeInput(gilmanFlyerEvent.start_time);
-    expect(startTimeInput).toBe("12:00");
+      const endTimeInput = extractTimeInput(event.end_time);
+      expect(endTimeInput).toBe("17:00");
 
-    const endTimeInput = extractTimeInput(gilmanFlyerEvent.end_time);
-    expect(endTimeInput).toBe("17:00");
+      const formattedDate = formatDateForDisplay(event.start_time);
+      expect(formattedDate).toContain("2026");
+      expect(formattedDate).toContain("Sep");
 
-    const formattedDate = formatDateForDisplay(gilmanFlyerEvent.start_time);
-    expect(formattedDate).toContain("2026");
-    expect(formattedDate).toContain("Sep");
+      const formattedStartTime = formatTimeForDisplay(event.start_time);
+      expect(formattedStartTime).not.toBe("");
 
-    const formattedStartTime = formatTimeForDisplay(gilmanFlyerEvent.start_time);
-    expect(formattedStartTime).not.toBe("");
+      const formattedEndTime = formatTimeForDisplay(event.end_time);
+      expect(formattedEndTime).not.toBe("");
 
-    const formattedEndTime = formatTimeForDisplay(gilmanFlyerEvent.end_time);
-    expect(formattedEndTime).not.toBe("");
+      const reconstructedStart = buildIsoFromDateTime("2026-09-12", "12:00");
+      expect(reconstructedStart).toContain("2026-09-12T12:00");
 
-    const reconstructedStart = buildIsoFromDateTime("2026-09-12", "12:00");
-    expect(reconstructedStart).toContain("2026-09-12T12:00");
+      const reconstructedEnd = buildIsoFromDateTime("2026-09-12", "17:00");
+      expect(reconstructedEnd).toContain("2026-09-12T17:00");
+    });
 
-    const reconstructedEnd = buildIsoFromDateTime("2026-09-12", "17:00");
-    expect(reconstructedEnd).toContain("2026-09-12T17:00");
-  });
+    it("extracts and formats date and time values accurately for UEP Ice Cream Social event", () => {
+      const event = parsedJsonEntryToEventDetails(instagramEntries[0]);
+      const dateInput = extractDateInput(event.start_time);
+      expect(dateInput).toBe("2026-09-09");
 
-  it("generates single event ICS correctly for UEP Ice Cream Social Instagram sample", () => {
-    const ics = generateIcsCalendarContent(instagramIceCreamSocialEvent);
-    expect(ics).toStartWith("BEGIN:VCALENDAR");
-    expect(ics).toEndWith("END:VCALENDAR");
-    expect(ics).toContain("BEGIN:VEVENT");
-    expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:UEP ICE CREAM SOCIAL");
-    expect(ics).toContain("LOCATION:BP Lawn (Bromfield-Pearson)\\, Tufts University");
-    expect(ics).toContain("STATUS:CONFIRMED");
-    expect(ics).toContain("DTSTART:20260909T160000Z");
-    expect(ics).toContain("DTEND:20260909T170000Z");
-  });
+      const startTimeInput = extractTimeInput(event.start_time);
+      expect(startTimeInput).toBe("12:00");
 
-  it("extracts and formats date and time values accurately for UEP Ice Cream Social Instagram event", () => {
-    const dateInput = extractDateInput(instagramIceCreamSocialEvent.start_time);
-    expect(dateInput).toBe("2026-09-09");
+      const endTimeInput = extractTimeInput(event.end_time);
+      expect(endTimeInput).toBe("13:00");
 
-    const startTimeInput = extractTimeInput(instagramIceCreamSocialEvent.start_time);
-    expect(startTimeInput).toBe("12:00");
+      const formattedDate = formatDateForDisplay(event.start_time);
+      expect(formattedDate).toContain("2026");
+      expect(formattedDate).toContain("Sep");
 
-    const endTimeInput = extractTimeInput(instagramIceCreamSocialEvent.end_time);
-    expect(endTimeInput).toBe("13:00");
+      const reconstructedStart = buildIsoFromDateTime("2026-09-09", "12:00");
+      expect(reconstructedStart).toContain("2026-09-09T12:00");
 
-    const formattedDate = formatDateForDisplay(instagramIceCreamSocialEvent.start_time);
-    expect(formattedDate).toContain("2026");
-    expect(formattedDate).toContain("Sep");
+      const reconstructedEnd = buildIsoFromDateTime("2026-09-09", "13:00");
+      expect(reconstructedEnd).toContain("2026-09-09T13:00");
+    });
 
-    const formattedStartTime = formatTimeForDisplay(instagramIceCreamSocialEvent.start_time);
-    expect(formattedStartTime).not.toBe("");
+    it("extracts date values accurately for all-day events (Squirrel Flower & Ride For Life)", () => {
+      const squirrel = parsedJsonEntryToEventDetails(squirrelFlowerEntries[0]);
+      expect(extractDateInput(squirrel.start_time)).toBe("2026-09-26");
+      expect(formatDateForDisplay(squirrel.start_time)).toContain("2026");
+      expect(formatDateForDisplay(squirrel.start_time)).toContain("Sep");
 
-    const formattedEndTime = formatTimeForDisplay(instagramIceCreamSocialEvent.end_time);
-    expect(formattedEndTime).not.toBe("");
+      const ride = parsedJsonEntryToEventDetails(rideForLifeEntries[0]);
+      expect(extractDateInput(ride.start_time)).toBe("2026-10-25");
+      expect(formatDateForDisplay(ride.start_time)).toContain("2026");
+      expect(formatDateForDisplay(ride.start_time)).toContain("Oct");
+    });
 
-    const reconstructedStart = buildIsoFromDateTime("2026-09-09", "12:00");
-    expect(reconstructedStart).toContain("2026-09-09T12:00");
+    it("formats dates and times for display accurately", () => {
+      const isoString = "2026-09-11T14:00:00Z";
+      const formattedDate = formatDateForDisplay(isoString);
+      expect(formattedDate).toContain("2026");
+      expect(formattedDate).toContain("Sep");
 
-    const reconstructedEnd = buildIsoFromDateTime("2026-09-09", "13:00");
-    expect(reconstructedEnd).toContain("2026-09-09T13:00");
-  });
-  it("generates single event ICS correctly for Squirrel Flower concert tour flyer sample", () => {
-    const ics = generateIcsCalendarContent(squirrelFlowerEvent);
-    expect(ics).toStartWith("BEGIN:VCALENDAR");
-    expect(ics).toEndWith("END:VCALENDAR");
-    expect(ics).toContain("BEGIN:VEVENT");
-    expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:Squirrel Flower – 2026 Tour (with youbet)");
-    expect(ics).toContain("LOCATION:Crystal Ballroom\\, Somerville\\, MA");
-    expect(ics).toContain("STATUS:CONFIRMED");
-    expect(ics).toContain("DTSTART;VALUE=DATE:20260926");
-    expect(ics).toContain("DTEND;VALUE=DATE:20260926");
-  });
+      const formattedTime = formatTimeForDisplay(isoString);
+      expect(formattedTime).not.toBe("");
 
-  it("extracts and formats date values accurately for Squirrel Flower flyer event", () => {
-    const dateInput = extractDateInput(squirrelFlowerEvent.start_time);
-    expect(dateInput).toBe("2026-09-26");
+      expect(formatDateForDisplay(null)).toBe("Date not specified");
+      expect(formatTimeForDisplay(null)).toBe("");
+    });
 
-    const formattedDate = formatDateForDisplay(squirrelFlowerEvent.start_time);
-    expect(formattedDate).toContain("2026");
-    expect(formattedDate).toContain("Sep");
-    expect(formattedDate).toContain("26");
-  });
-  it("generates single event ICS correctly for Ride For Your Life advocacy event sample", () => {
-    const ics = generateIcsCalendarContent(rideForLifeEvent);
-    expect(ics).toStartWith("BEGIN:VCALENDAR");
-    expect(ics).toEndWith("END:VCALENDAR");
-    expect(ics).toContain("BEGIN:VEVENT");
-    expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:Ride For Your Life - Boston");
-    expect(ics).toContain("LOCATION:Boston\\, MA");
-    expect(ics).toContain(
-      'DESCRIPTION:RIDE. WALK. RALLY. Motto: "OUR STREETS EXIST For EVERYONE". Memorial and safe streets advocacy event.',
-    );
-    expect(ics).toContain("STATUS:CONFIRMED");
-    expect(ics).toContain("DTSTART;VALUE=DATE:20261025");
-    expect(ics).toContain("DTEND;VALUE=DATE:20261025");
-  });
+    it("extracts date and time input values for editing form", () => {
+      const isoString = "2026-09-11T14:30:00Z";
+      const dateInput = extractDateInput(isoString);
+      expect(dateInput.length).toBe(10); // YYYY-MM-DD format
 
-  it("extracts and formats date values accurately for Ride For Your Life event", () => {
-    const dateInput = extractDateInput(rideForLifeEvent.start_time);
-    expect(dateInput).toBe("2026-10-25");
+      const timeInput = extractTimeInput(isoString);
+      expect(timeInput).toMatch(/^\d{2}:\d{2}$/);
+    });
 
-    const formattedDate = formatDateForDisplay(rideForLifeEvent.start_time);
-    expect(formattedDate).toContain("2026");
-    expect(formattedDate).toContain("Oct");
-    expect(formattedDate).toContain("25");
-  });
+    it("builds ISO string from separate date and time input strings", () => {
+      const iso = buildIsoFromDateTime("2026-09-11", "14:30");
+      expect(iso).toContain("2026-09-11");
+    });
 
-  it("formats dates and times for display accurately", () => {
-    const isoString = "2026-09-11T14:00:00Z";
-    const formattedDate = formatDateForDisplay(isoString);
-    expect(formattedDate).toContain("2026");
-    expect(formattedDate).toContain("Sep");
+    it("formats recurrence rules into human-readable text", () => {
+      expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z")).toBe(
+        "Repeats: Mon, Wed until Dec 18, 2026",
+      );
+      expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=TU,TH")).toBe("Repeats: Tue, Thu");
+      expect(formatRecurrenceForDisplay("FREQ=DAILY")).toBe("Repeats daily");
+      expect(formatRecurrenceForDisplay(null)).toBeNull();
+    });
 
-    const formattedTime = formatTimeForDisplay(isoString);
-    expect(formattedTime).not.toBe("");
+    it("parses and builds typed recurrence rules with end-of-day inclusive UNTIL", () => {
+      const parsedFromPicker = parseRecurrenceRule(
+        "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=2026-12-18",
+      );
+      expect(parsedFromPicker).not.toBeNull();
+      expect(parsedFromPicker!.frequency).toBe("WEEKLY");
+      expect(parsedFromPicker!.interval).toBe(2);
+      expect(parsedFromPicker!.byDays).toEqual(["MO", "WE"]);
+      expect(parsedFromPicker!.until).toBe("2026-12-18");
 
-    expect(formatDateForDisplay(null)).toBe("Date not specified");
-    expect(formatTimeForDisplay(null)).toBe("");
-  });
+      const rebuilt = buildRecurrenceRule(parsedFromPicker);
+      expect(rebuilt).toBe("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=20261218T235959");
+    });
 
-  it("extracts date and time input values for editing form", () => {
-    const isoString = "2026-09-11T14:30:00Z";
-    const dateInput = extractDateInput(isoString);
-    expect(dateInput.length).toBe(10); // YYYY-MM-DD format
+    it("emits floating local DTSTART and DTEND for recurring events to preserve wall-clock time across DST transitions", () => {
+      const recurringClassOffset: EventDetails = {
+        title: "CEE 0154-03 Principles Epidemiology (Lecture)",
+        start_time: "2026-09-07T15:00:00-04:00",
+        end_time: "2026-09-07T16:15:00-04:00",
+        is_all_day: false,
+        location: "Anderson Wing TTC, Room 306",
+        description: "Days: Mo, We",
+        recurrence_rule: "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959",
+        confidence: 0.95,
+        source: "deterministic_schedule",
+      };
 
-    const timeInput = extractTimeInput(isoString);
-    expect(timeInput).toMatch(/^\d{2}:\d{2}$/);
-  });
-
-  it("builds ISO string from separate date and time input strings", () => {
-    const iso = buildIsoFromDateTime("2026-09-11", "14:30");
-    expect(iso).toContain("2026-09-11");
-  });
-
-  it("formats recurrence rules into human-readable text", () => {
-    expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z")).toBe(
-      "Repeats: Mon, Wed until Dec 18, 2026",
-    );
-    expect(formatRecurrenceForDisplay("FREQ=WEEKLY;BYDAY=TU,TH")).toBe("Repeats: Tue, Thu");
-    expect(formatRecurrenceForDisplay("FREQ=DAILY")).toBe("Repeats daily");
-    expect(formatRecurrenceForDisplay(null)).toBeNull();
-  });
-
-  it("parses and builds typed recurrence rules with end-of-day inclusive UNTIL", () => {
-    const parsedFromPicker = parseRecurrenceRule(
-      "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=2026-12-18",
-    );
-    expect(parsedFromPicker).not.toBeNull();
-    expect(parsedFromPicker!.frequency).toBe("WEEKLY");
-    expect(parsedFromPicker!.interval).toBe(2);
-    expect(parsedFromPicker!.byDays).toEqual(["MO", "WE"]);
-    expect(parsedFromPicker!.until).toBe("2026-12-18");
-
-    // Date picker input "2026-12-18" is serialized as end-of-day DATE-TIME "20261218T235959" to match DTSTART type and include end-date afternoon classes
-    const rebuilt = buildRecurrenceRule(parsedFromPicker);
-    expect(rebuilt).toBe("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=20261218T235959");
-  });
-
-  it("emits floating local DTSTART and DTEND for recurring events to preserve wall-clock time across DST transitions", () => {
-    const recurringClassOffset: EventDetails = {
-      title: "CEE 0154-03 Principles Epidemiology (Lecture)",
-      start_time: "2026-09-07T15:00:00-04:00",
-      end_time: "2026-09-07T16:15:00-04:00",
-      is_all_day: false,
-      location: "Anderson Wing TTC, Room 306",
-      description: "Days: Mo, We",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    };
-
-    const icsOffset = generateIcsCalendarContent(recurringClassOffset);
-    // Floating datetime format YYYYMMDDTHHMMSS without 'Z' preserves local 3:00 PM across November DST boundary
-    expect(icsOffset).toContain("DTSTART:20260907T150000");
-    expect(icsOffset).toContain("DTEND:20260907T161500");
-    expect(icsOffset).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959");
-
-    const formIsoStart = buildIsoFromDateTime("2026-09-07", "15:00");
-    const formIsoEnd = buildIsoFromDateTime("2026-09-07", "16:15");
-
-    const recurringClassFromForm: EventDetails = {
-      title: "CEE 0154-03 Principles Epidemiology (Lecture)",
-      start_time: formIsoStart,
-      end_time: formIsoEnd,
-      is_all_day: false,
-      location: "Anderson Wing TTC, Room 306",
-      description: "Days: Mo, We",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959",
-      confidence: 0.95,
-      source: "form",
-    };
-
-    const icsForm = generateIcsCalendarContent(recurringClassFromForm);
-    expect(icsForm).toContain("DTSTART:20260907T150000");
-    expect(icsForm).toContain("DTEND:20260907T161500");
+      const icsOffset = generateIcsCalendarContent(recurringClassOffset);
+      expect(icsOffset).toContain("DTSTART:20260907T150000");
+      expect(icsOffset).toContain("DTEND:20260907T161500");
+      expect(icsOffset).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959");
+    });
   });
 });

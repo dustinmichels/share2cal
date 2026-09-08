@@ -945,6 +945,25 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
     // 2. Time Extraction
     let extracted_times = extract_times(ocr_text);
 
+    let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
+    let (weekday_days_opt, single_recurrence_rule) = if extracted_date.is_none() {
+        if let Some(dm) = day_pattern_re.find(ocr_text) {
+            let days_str = dm.as_str().trim();
+            let bydays = parse_weekdays_to_byday(days_str);
+            if !bydays.is_empty() {
+                let first_day = days_str.split(',').next().map(|s| s.trim()).unwrap_or(days_str);
+                let rrule = RecurrenceRule::new_weekly(bydays, None).to_rrule_string();
+                (Some(first_day.to_string()), Some(rrule))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
+
     // Combine date & time into ISO-8601 timestamps
     let (start_time_iso, end_time_iso, is_all_day) = match (extracted_date, extracted_times) {
         (Some(date), Some((start_time, end_time_opt))) => {
@@ -971,11 +990,15 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
             (Some(date_str.clone()), Some(date_str), true)
         }
         (None, Some((start_time, end_time_opt))) => {
-            // Time found but no date -> assume reference date (or tomorrow if time already passed today)
-            let mut target_date = ref_dt.date_naive();
-            if start_time < ref_dt.time() {
-                target_date = target_date + Duration::days(1);
-            }
+            let target_date = if let Some(first_day) = &weekday_days_opt {
+                get_weekday_date(first_day, ref_dt).unwrap_or_else(|| ref_dt.date_naive())
+            } else {
+                let mut d = ref_dt.date_naive();
+                if start_time < ref_dt.time() {
+                    d = d + Duration::days(1);
+                }
+                d
+            };
             let start_dt = offset.from_local_datetime(&target_date.and_time(start_time)).unwrap();
             let end_dt_str = if let Some(end_time) = end_time_opt {
                 let end_date = if end_time < start_time {
@@ -1026,7 +1049,7 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
         is_all_day,
         location,
         description,
-        recurrence_rule: None,
+        recurrence_rule: single_recurrence_rule,
         confidence,
         source: "deterministic".to_string(),
     }
@@ -1447,7 +1470,9 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
         "PARADE", "MARKET", "BLOCK PARTY", "OPEN MIC", "GAME NIGHT", "TRIVIA",
         "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING", "SOCIAL", "ICE CREAM", "RECEPTION",
         "RIDE", "RALLY", "WALK", "RUN", "MARATHON", "TOUR", "RACE",
+        "SEMINAR", "LECTURE", "CLASS", "COURSE", "TALK", "PANEL",
     ];
+    let course_code_re = Regex::new(r"^[A-Z]{2,6}[-\s]\d{3,4}").unwrap();
     let mut candidate_titles: Vec<(String, usize, i32)> = Vec::new();
 
     // Detect supporting act / opener (e.g. "WITH\nyoubef" or "WITH youbef" or "FEATURING ...")
@@ -1513,6 +1538,10 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
         // If uppercase or Title Cased, add a boost
         if upper == trimmed && trimmed.len() > 5 {
             score += 5;
+        }
+        // Boost for course codes at start of line
+        if course_code_re.is_match(trimmed) {
+            score += 35;
         }
         // If we have a supporting act and this is a top artist line (not a tour subtitle), generate "Artist (with Opener)"
         if let Some(act) = &supporting_act {

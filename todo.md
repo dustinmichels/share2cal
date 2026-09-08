@@ -103,3 +103,52 @@ Checklist and architectural specifications for adding native **Android** and **W
   3. Spatial Line Clustering & Schedule Table Parser.
   4. Local LLM GBNF Structured Extraction with Deterministic Fallback.
   5. Native Calendar Insertion & `.ics` Backup Export.
+
+---
+
+## 4. QR Code & Barcode Ingestion
+
+### 4.1 Native Detection & Ingestion Pipeline
+
+- [ ] **Apple Vision Backend (`ocr_apple.m`)**:
+  - Add `VNDetectBarcodesRequest` (`symbologies = @[VNBarcodeSymbologyQR]`) alongside `VNRecognizeTextRequest` in the `VNImageRequestHandler.performRequests` invocation.
+  - Extract decoded payload strings (`obs.payloadStringValue`) and bounding boxes from `VNBarcodeObservation` results.
+  - Serialize `qr_codes` array in the JSON returned across the C FFI boundary to Rust.
+- [ ] **Android Backend (`ocr_android.rs` / `OcrPlugin.kt`)**:
+  - Integrate Google ML Kit Barcode Scanning (`com.google.mlkit:barcode-scanning`) into the Android image processing pipeline.
+  - Run barcode scanning concurrently with text recognition on the input bitmap.
+- [ ] **Windows / Cross-Platform Fallback (`ocr_windows.rs` / pure Rust)**:
+  - Evaluate `Windows.Media.Ocr` / `ZXing` / `rxing` crate for decoding barcodes on non-Apple/non-Android builds.
+
+### 4.2 Data Model & First-Class URL Field
+
+- [ ] **OCR Data Model (`src-tauri/src/ocr.rs` & `src/services/ocr.ts`)**:
+  - Add `qr_codes: Vec<String>` with `#[serde(default)]` to `OcrResult` (ensures backward compatibility if omitted by any backend).
+  - Mirror `qr_codes?: string[]` on TypeScript interface `OcrResult`.
+- [ ] **Event Model Structs (`src-tauri/src/parser.rs` & `src/services/event.ts`)**:
+  - Add `pub url: Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]` to `EventDetails` struct in Rust.
+  - Update LLM JSON schema and GBNF grammar in `parser.rs` to include `"url": {"type": ["string", "null"]}`.
+  - Add `url?: string | null` to `EventDetails` and `url: string` to `EventFormData` in TypeScript.
+- [ ] **Calendar Creation Objects (`src-tauri/src/calendar.rs` & `src/services/calendar.ts`)**:
+  - Add `url: Option<String>` to `CreateEventParams` struct in Rust and TypeScript interface.
+  - Wire `url` to native Apple EventKit (`calendar_apple.m`: `event.URL = [NSURL URLWithString:...]`).
+  - Wire `url` to Windows Appointment (`calendar_windows.rs`: `appointment.SetUri(...)`) and Android calendar provider.
+  - Include `URL:<url>` in generated `.ics` calendar files (`calendar.rs` and `services/calendar.ts`).
+- [ ] **Frontend Ingestion & UI (`src/App.vue`, `EventFormCard.vue`, `EventPreviewCard.vue`)**:
+  - Update empty OCR extraction guard in `App.vue` (`!res.text.trim()`) to `!res.text.trim() && (!res.qr_codes || res.qr_codes.length === 0)` so QR-dominant flyers with minimal OCR text are processed.
+  - Add editable "URL / Meeting Link" input field to `EventFormCard.vue` and link badge/preview to `EventPreviewCard.vue`.
+  - Display detected QR links as interactive chips or clickable previews in `ImagePreviewCard.vue` / `OcrDrawer.vue`.
+
+### 4.3 Parser & LLM Orchestration
+
+- [ ] **Parser & LLM Context (`src-tauri/src/lib.rs` & `src-tauri/src/parser.rs`)**:
+  - Append detected QR links/URLs to the text prompt supplied to the LLM (e.g., `Links / QR Codes: <url>`) so the model incorporates meeting/RSVP links into the event `url`, `description`, or `location`.
+  - Update deterministic parser (`parse_event_deterministic`) to populate `EventDetails.url` with the first detected QR code or web link when available.
+- [ ] **Calendar Export Verification**:
+  - Verify that single and batch calendar additions persist the `url` property across both native calendar store and `.ics` download flows.
+
+### 4.4 Fixtures & Verification
+
+- [ ] Add regression and integration test coverage for `samples/commons.jpg`:
+  - Verify QR code decodes to `https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw`.
+  - Verify parsed event includes title ("CAMPUS AS COMMONS: Agroforestry and Shared Stewardship at Tufts"), speaker, date/time, and the webinar link in description/location.
