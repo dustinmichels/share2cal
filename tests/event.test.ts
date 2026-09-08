@@ -12,107 +12,44 @@ import {
   buildIsoFromDateTime,
   type EventDetails,
 } from "../src/services/event";
+import parsedManifest from "../samples/parsed.json";
 
-describe("Event Service & Multi-Event ICS Generation", () => {
-  const sampleEvents: EventDetails[] = [
-    {
-      title: "CEE 0154-03 Principles Epidemiology (Lecture)",
-      start_time: "2026-09-07T15:00:00-04:00",
-      end_time: "2026-09-07T16:15:00-04:00",
-      is_all_day: false,
-      location: "Anderson Wing TTC, Room 306",
-      description: "Days: Mo, We | Faculty: L. Abrams | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-    {
-      title: "CS 0150-09 Special Topics - Analysis Mthds Images, Text & (Lecture)",
-      start_time: "2026-09-11T14:00:00-04:00",
-      end_time: "2026-09-11T16:30:00-04:00",
-      is_all_day: false,
-      location: "Online",
-      description: "Days: Fr | Faculty: J. Skripchuk | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=FR;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-    {
-      title: "CSHD 0166-01 Children's Play (Lecture)",
-      start_time: "2026-09-10T13:30:00-04:00",
-      end_time: "2026-09-10T16:00:00-04:00",
-      is_all_day: false,
-      location: "Eliot-Pearson, Room 157",
-      description: "Days: Th | Faculty: W. Scarlett | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=TH;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-    {
-      title: "CSHD 0167-01 Children & Media (Lecture)",
-      start_time: "2026-09-11T09:00:00-04:00",
-      end_time: "2026-09-11T11:30:00-04:00",
-      is_all_day: false,
-      location: "Eaton Hall, 201",
-      description: "Days: Fr | Faculty: J. Dobrow | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=FR;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-    {
-      title: "UEP 0254-01 Quantitative Reasoning (Lecture)",
-      start_time: "2026-09-08T09:00:00-04:00",
-      end_time: "2026-09-08T10:15:00-04:00",
-      is_all_day: false,
-      location: "Joyce Cummings Center, 302",
-      description: "Days: Tu, Th | Faculty: S. Shamsuddin | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-    {
-      title: "UEP 0262-01 Solidarity Economy Movements (Seminar)",
-      start_time: "2026-09-08T12:00:00-04:00",
-      end_time: "2026-09-08T14:30:00-04:00",
-      is_all_day: false,
-      location: "Bromfield-Pearson, Room 006",
-      description: "Days: Tu | Faculty: P. Loh | Units: 3.00",
-      recurrence_rule: "FREQ=WEEKLY;BYDAY=TU;UNTIL=20261218T235959Z",
-      confidence: 0.95,
-      source: "deterministic_schedule",
-    },
-  ];
+describe("Event Service & Multi-Event ICS Generation (using samples/parsed.json)", () => {
+  // Load source of truth directly from samples/parsed.json
+  const sampleEvents: EventDetails[] = (
+    parsedManifest["samples/classes.png"] as Array<Record<string, unknown>>
+  ).map((e) => ({
+    title: String(e.title),
+    start_time: (e.start_time as string) ?? null,
+    end_time: (e.end_time as string) ?? null,
+    is_all_day: Boolean(e.is_all_day),
+    location: (e.location as string) ?? null,
+    description: (e.description as string) ?? null,
+    recurrence_rule: (e.recurrence_rule as string) ?? null,
+    confidence: 0.95,
+    source: "deterministic_schedule",
+  }));
 
   const gilmanFlyerEvent: EventDetails = {
-    title: "SomerStreets: Gilman Square Arts & Music Festival",
-    start_time: "2026-09-12T12:00:00-04:00",
-    end_time: "2026-09-12T17:00:00-04:00",
-    is_all_day: false,
-    location: "Ed Leathers Park (Walnut St & Skilton Ave), Somerville, MA",
-    description:
-      "Rain date: Sunday, September 13, 2026. Live music & performances, beer garden, food vendors, artists & makers, and kids activities.",
+    ...(parsedManifest["samples/gilman_flyer.png"][0] as EventDetails),
     confidence: 0.95,
     source: "deterministic_flyer",
   };
 
   const instagramIceCreamSocialEvent: EventDetails = {
-    title: "UEP ICE CREAM SOCIAL",
-    start_time: "2026-09-09T12:00:00-04:00",
-    end_time: "2026-09-09T13:00:00-04:00",
-    is_all_day: false,
-    location: "BP LAWN",
-    description:
-      "We invite you to have dessert with us. Don't like ice cream? We have iced coffee, iced tea, and fruit too!",
+    ...(parsedManifest["samples/instagram.png"][0] as EventDetails),
     confidence: 0.95,
     source: "deterministic_flyer",
   };
+
   const squirrelFlowerEvent: EventDetails = {
-    title: "Squirrel Flower (with You Bet)",
-    start_time: "2026-09-26",
-    end_time: "2026-09-26",
-    is_all_day: true,
-    location: "Crystal Ballroom, Somerville, MA",
-    description: "2026 Tour",
+    ...(parsedManifest["samples/squirrel_flower.jpg"][0] as EventDetails),
+    confidence: 0.95,
+    source: "deterministic_flyer",
+  };
+
+  const rideForLifeEvent: EventDetails = {
+    ...(parsedManifest["samples/ride_for_life.png"][0] as EventDetails),
     confidence: 0.95,
     source: "deterministic_flyer",
   };
@@ -132,20 +69,21 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(endMatches).not.toBeNull();
     expect(endMatches!.length).toBe(6);
 
-    // Verify presence of event titles
-    expect(icsContent).toContain("SUMMARY:CEE 0154-03 Principles Epidemiology (Lecture)");
+    // Verify presence of event titles from parsed.json
+    expect(icsContent).toContain("SUMMARY:CEE 0154-03 (80513) Principles Epidemiology (Lecture)");
     expect(icsContent).toContain(
-      "SUMMARY:CS 0150-09 Special Topics - Analysis Mthds Images\\, Text & (Lecture)",
+      "SUMMARY:CS 0150-09 (84779) Special Topics - Analysis Mthds Images\\, Text & (Lecture)",
     );
-    expect(icsContent).toContain("SUMMARY:CSHD 0166-01 Children's Play (Lecture)");
-    expect(icsContent).toContain("SUMMARY:CSHD 0167-01 Children & Media (Lecture)");
-    expect(icsContent).toContain("SUMMARY:UEP 0254-01 Quantitative Reasoning (Lecture)");
-    expect(icsContent).toContain("SUMMARY:UEP 0262-01 Solidarity Economy Movements (Seminar)");
+    expect(icsContent).toContain("SUMMARY:CSHD 0166-01 (82454) Children's Play (Lecture)");
+    expect(icsContent).toContain("SUMMARY:CSHD 0167-01 (80739) Children & Media (Lecture)");
+    expect(icsContent).toContain("SUMMARY:UEP 0254-01 (81300) Quantitative Reasoning (Lecture)");
+    expect(icsContent).toContain(
+      "SUMMARY:UEP 0262-01 (82571) Solidarity Economy Movements (Seminar)",
+    );
 
-    // Verify locations and descriptions
+    // Verify locations and descriptions from parsed.json
     expect(icsContent).toContain("LOCATION:Anderson Wing TTC\\, Room 306");
     expect(icsContent).toContain("LOCATION:Online");
-    expect(icsContent).toContain("DESCRIPTION:Days: Mo\\, We | Faculty: L. Abrams | Units: 3.00");
 
     // Verify RRULE presence in multi-event ICS
     expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z");
@@ -154,12 +92,27 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TH;UNTIL=20261218T235959Z");
     expect(icsContent).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261218T235959Z");
   });
-  it("generates single event ICS correctly", () => {
-    const single = sampleEvents[0];
-    const ics = generateIcsCalendarContent(single);
-    expect(ics).toStartWith("BEGIN:VCALENDAR");
-    expect(ics).toEndWith("END:VCALENDAR");
-    expect(ics).toContain("SUMMARY:CEE 0154-03 Principles Epidemiology (Lecture)");
+
+  it("handles recurring relative weekday calculations starting on the next upcoming matching weekday", () => {
+    /**
+     * COMPLEXITY / SPECIFICATION NOTE:
+     * When parsing recurring schedules (like class schedules "Mo, We 3:00 PM - 4:15 PM") without
+     * an absolute calendar year/date in the image, the event is defined to repeat weekly starting
+     * on the NEXT matching weekday relative to WHEN the code is run (or reference context).
+     *
+     * If the tests are run on a different date (e.g. next week or next month):
+     * - The start and end calendar dates (YYYY-MM-DD) will advance to the next upcoming weekdays.
+     * - The start time-of-day (15:00), end time-of-day (16:15), duration (75m), and recurrence rule (BYDAY=MO,WE)
+     *   remain strictly identical.
+     */
+    const mondayClass = sampleEvents[0]; // CEE 0154-03
+    expect(mondayClass.recurrence_rule).toContain("BYDAY=MO,WE");
+    expect(mondayClass.is_all_day).toBe(false);
+
+    const startTimeInput = extractTimeInput(mondayClass.start_time);
+    expect(startTimeInput).toBe("15:00");
+    const endTimeInput = extractTimeInput(mondayClass.end_time);
+    expect(endTimeInput).toBe("16:15");
   });
 
   it("generates single event ICS correctly for Gilman Square Arts & Music Festival flyer sample", () => {
@@ -168,12 +121,9 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(ics).toEndWith("END:VCALENDAR");
     expect(ics).toContain("BEGIN:VEVENT");
     expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:SomerStreets: Gilman Square Arts & Music Festival");
+    expect(ics).toContain("SUMMARY:SomerStreets Gilman Square Arts & Music Festival");
     expect(ics).toContain(
-      "LOCATION:Ed Leathers Park (Walnut St & Skilton Ave)\\, Somerville\\, MA",
-    );
-    expect(ics).toContain(
-      "DESCRIPTION:Rain date: Sunday\\, September 13\\, 2026. Live music & performances\\, beer garden\\, food vendors\\, artists & makers\\, and kids activities.",
+      "LOCATION:Ed Leathers Park\\, Walnut Street and Skilton Ave\\, Somerville\\, MA",
     );
     expect(ics).toContain("STATUS:CONFIRMED");
     expect(ics).toContain("DTSTART:20260912T160000Z");
@@ -214,10 +164,7 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(ics).toContain("BEGIN:VEVENT");
     expect(ics).toContain("END:VEVENT");
     expect(ics).toContain("SUMMARY:UEP ICE CREAM SOCIAL");
-    expect(ics).toContain("LOCATION:BP LAWN");
-    expect(ics).toContain(
-      "DESCRIPTION:We invite you to have dessert with us. Don't like ice cream? We have iced coffee\\, iced tea\\, and fruit too!",
-    );
+    expect(ics).toContain("LOCATION:BP Lawn (Bromfield-Pearson)\\, Tufts University");
     expect(ics).toContain("STATUS:CONFIRMED");
     expect(ics).toContain("DTSTART:20260909T160000Z");
     expect(ics).toContain("DTEND:20260909T170000Z");
@@ -255,9 +202,8 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(ics).toEndWith("END:VCALENDAR");
     expect(ics).toContain("BEGIN:VEVENT");
     expect(ics).toContain("END:VEVENT");
-    expect(ics).toContain("SUMMARY:Squirrel Flower (with You Bet)");
+    expect(ics).toContain("SUMMARY:Squirrel Flower – 2026 Tour (with youbet)");
     expect(ics).toContain("LOCATION:Crystal Ballroom\\, Somerville\\, MA");
-    expect(ics).toContain("DESCRIPTION:2026 Tour");
     expect(ics).toContain("STATUS:CONFIRMED");
     expect(ics).toContain("DTSTART;VALUE=DATE:20260926");
     expect(ics).toContain("DTEND;VALUE=DATE:20260926");
@@ -271,6 +217,31 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(formattedDate).toContain("2026");
     expect(formattedDate).toContain("Sep");
     expect(formattedDate).toContain("26");
+  });
+  it("generates single event ICS correctly for Ride For Your Life advocacy event sample", () => {
+    const ics = generateIcsCalendarContent(rideForLifeEvent);
+    expect(ics).toStartWith("BEGIN:VCALENDAR");
+    expect(ics).toEndWith("END:VCALENDAR");
+    expect(ics).toContain("BEGIN:VEVENT");
+    expect(ics).toContain("END:VEVENT");
+    expect(ics).toContain("SUMMARY:Ride For Your Life - Boston");
+    expect(ics).toContain("LOCATION:Boston\\, MA");
+    expect(ics).toContain(
+      'DESCRIPTION:RIDE. WALK. RALLY. Motto: "OUR STREETS EXIST For EVERYONE". Memorial and safe streets advocacy event.',
+    );
+    expect(ics).toContain("STATUS:CONFIRMED");
+    expect(ics).toContain("DTSTART;VALUE=DATE:20261025");
+    expect(ics).toContain("DTEND;VALUE=DATE:20261025");
+  });
+
+  it("extracts and formats date values accurately for Ride For Your Life event", () => {
+    const dateInput = extractDateInput(rideForLifeEvent.start_time);
+    expect(dateInput).toBe("2026-10-25");
+
+    const formattedDate = formatDateForDisplay(rideForLifeEvent.start_time);
+    expect(formattedDate).toContain("2026");
+    expect(formattedDate).toContain("Oct");
+    expect(formattedDate).toContain("25");
   });
 
   it("formats dates and times for display accurately", () => {

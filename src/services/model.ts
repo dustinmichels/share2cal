@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-
+import { getStoredParsingMode, setStoredParsingMode, type ParsingMode } from "./settings";
 export interface ModelManifestEntry {
   id: string;
   name: string;
@@ -260,4 +260,132 @@ export function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
   if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
   return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
+export interface AutoDownloadResult {
+  triggered: boolean;
+  mode: ParsingMode;
+  modelId?: string;
+  reason?:
+    | "already_ready"
+    | "already_downloading"
+    | "download_started"
+    | "insufficient_space"
+    | "disabled"
+    | "error";
+  freeBytes?: number | null;
+  requiredBytes?: number;
+  error?: string;
+}
+
+/**
+ * Checks if the device has sufficient disk space for the default LLM (requires >= 1.5x model size).
+ * If in enhanced mode and the default model is not yet downloaded:
+ * - If space is sufficient, initiates background download of the default LLM immediately.
+ * - If space is insufficient, switches parsing mode to 'simple' fallback and persists it.
+ */
+export async function checkDiskSpaceAndAutoDownloadDefaultModel(): Promise<AutoDownloadResult> {
+  const currentMode = getStoredParsingMode();
+  if (currentMode !== "enhanced") {
+    return {
+      triggered: false,
+      mode: currentMode,
+      reason: "disabled",
+    };
+  }
+
+  try {
+    const [statuses, storageInfo] = await Promise.all([getModelStatuses(), getModelsStorageInfo()]);
+
+    const defaultModel = statuses.find((m) => m.is_default) || statuses[0];
+    if (!defaultModel) {
+      return {
+        triggered: false,
+        mode: currentMode,
+        reason: "error",
+        error: "No default model found in manifest",
+      };
+    }
+
+    if (defaultModel.is_downloaded) {
+      return {
+        triggered: false,
+        mode: "enhanced",
+        modelId: defaultModel.id,
+        reason: "already_ready",
+      };
+    }
+
+    if (defaultModel.is_downloading) {
+      return {
+        triggered: false,
+        mode: "enhanced",
+        modelId: defaultModel.id,
+        reason: "already_downloading",
+      };
+    }
+
+    const requiredBytes = Math.round(defaultModel.size_bytes * 1.5);
+    const freeBytes = storageInfo?.free_disk_space_bytes;
+
+    if (typeof freeBytes === "number" && freeBytes < requiredBytes) {
+      setStoredParsingMode("simple");
+      return {
+        triggered: false,
+        mode: "simple",
+        modelId: defaultModel.id,
+        reason: "insufficient_space",
+        freeBytes,
+        requiredBytes,
+        error: `Insufficient disk space: ${formatBytes(freeBytes)} free, but ${formatBytes(requiredBytes)} required.`,
+      };
+    }
+
+    try {
+      await downloadModel(defaultModel.id);
+      return {
+        triggered: true,
+        mode: "enhanced",
+        modelId: defaultModel.id,
+        reason: "download_started",
+        freeBytes: freeBytes ?? null,
+        requiredBytes,
+      };
+    } catch (downloadErr: unknown) {
+      const errMsg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
+      const isSpaceErr =
+        errMsg.toLowerCase().includes("insufficient disk space") ||
+        errMsg.toLowerCase().includes("disk space");
+
+      if (isSpaceErr) {
+        setStoredParsingMode("simple");
+        return {
+          triggered: false,
+          mode: "simple",
+          modelId: defaultModel.id,
+          reason: "insufficient_space",
+          freeBytes: freeBytes ?? null,
+          requiredBytes,
+          error: errMsg,
+        };
+      }
+
+      return {
+        triggered: false,
+        mode: "enhanced",
+        modelId: defaultModel.id,
+        reason: "error",
+        error: errMsg,
+      };
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn("Failed to check disk space and auto-download default model:", err);
+    return {
+      triggered: false,
+      mode: currentMode,
+      reason: "error",
+      error: errMsg,
+    };
+  }
 }

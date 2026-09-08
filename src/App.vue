@@ -27,7 +27,13 @@ import {
   payloadToFile,
   loadImageFromPath,
 } from "./services/share";
-import { getModelStatuses, type ModelStatus } from "./services/model";
+import {
+  getModelStatuses,
+  onModelDownloadProgress,
+  checkDiskSpaceAndAutoDownloadDefaultModel,
+  type ModelStatus,
+  type DownloadProgressPayload,
+} from "./services/model";
 import {
   getStoredParsingMode,
   setStoredParsingMode,
@@ -57,6 +63,22 @@ async function refreshModelStatus() {
     modelStatuses.value = await getModelStatuses();
   } catch (err) {
     console.warn("Failed to check model statuses in App:", err);
+  }
+}
+let unlistenModelProgress: (() => void) | null = null;
+
+async function initAutoDownload() {
+  try {
+    await refreshModelStatus();
+    const result = await checkDiskSpaceAndAutoDownloadDefaultModel();
+    if (result.mode !== parsingMode.value) {
+      updateParsingMode(result.mode);
+    }
+    if (result.reason === "insufficient_space" && result.error) {
+      errorMessage.value = "Low disk space for AI model. Share2Cal is running in Simple Mode.";
+    }
+  } catch (err) {
+    console.warn("Failed initial model auto-download check:", err);
   }
 }
 
@@ -629,7 +651,7 @@ function handleVisibilityChange() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("paste", handlePaste);
   window.addEventListener("focus", checkPendingShare);
   document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -638,8 +660,26 @@ onMounted(() => {
   window.addEventListener("drop", handleWindowDrop);
   setupDragDrop();
   checkPendingShare();
-  refreshModelStatus();
   refreshCalendars();
+
+  try {
+    unlistenModelProgress = await onModelDownloadProgress((payload: DownloadProgressPayload) => {
+      if (payload.status === "completed") {
+        refreshModelStatus();
+      } else if (payload.status === "error") {
+        const errLower = (payload.error || "").toLowerCase();
+        if (errLower.includes("insufficient disk space") || errLower.includes("disk space")) {
+          updateParsingMode("simple");
+          errorMessage.value = "Insufficient disk space for AI model. Switched to Simple Mode.";
+        }
+        refreshModelStatus();
+      }
+    });
+  } catch (err) {
+    console.warn("Could not register model download progress listener in App:", err);
+  }
+
+  await initAutoDownload();
 });
 
 onUnmounted(() => {
@@ -652,6 +692,10 @@ onUnmounted(() => {
   if (unlistenDragDrop) {
     unlistenDragDrop();
     unlistenDragDrop = null;
+  }
+  if (unlistenModelProgress) {
+    unlistenModelProgress();
+    unlistenModelProgress = null;
   }
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value);
@@ -673,29 +717,30 @@ onUnmounted(() => {
         >
           <Settings class="settings-icon" :stroke-width="2" />
         </button>
-        <div class="logo-badge">
-          <svg
-            class="logo-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
-            <path d="M8 14h.01"></path>
-            <path d="M12 14h.01"></path>
-            <path d="M16 14h.01"></path>
-            <path d="M8 18h.01"></path>
-            <path d="M12 18h.01"></path>
-          </svg>
+        <div class="brand-group">
+          <div class="logo-badge">
+            <svg
+              class="logo-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+              <path d="M8 14h.01"></path>
+              <path d="M12 14h.01"></path>
+              <path d="M16 14h.01"></path>
+              <path d="M8 18h.01"></path>
+              <path d="M12 18h.01"></path>
+            </svg>
+          </div>
+          <h1 class="app-title">Share2Cal</h1>
         </div>
-        <h1 class="app-title">Share2Cal</h1>
-        <p class="app-tagline">Turn flyers and invitations into calendar events in seconds</p>
       </header>
 
       <!-- Share Notification Banner -->
@@ -1095,17 +1140,25 @@ onUnmounted(() => {
 .app-header {
   position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
-  padding: 0.5rem 0.5rem 0.25rem;
+  justify-content: center;
+  padding: 0.25rem 0.5rem;
   width: 100%;
+  min-height: 40px;
+}
+
+.brand-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
 }
 
 .btn-settings-icon {
   position: absolute;
-  top: 0.25rem;
-  left: 0;
+  top: 50%;
+  right: 0;
+  margin-top: -19px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1121,7 +1174,6 @@ onUnmounted(() => {
   padding: 0;
   -webkit-tap-highlight-color: transparent;
 }
-
 .btn-settings-icon:hover {
   color: var(--accent-primary);
   border-color: rgba(0, 122, 255, 0.3);
@@ -1235,37 +1287,28 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   background: linear-gradient(135deg, #007aff 0%, #5856d6 100%);
-  border-radius: 14px;
+  border-radius: 10px;
   color: #ffffff;
-  margin-bottom: 0.75rem;
-  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.3);
+  box-shadow: 0 3px 12px rgba(0, 122, 255, 0.3);
+  flex-shrink: 0;
 }
 
 .logo-icon {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
 }
 
 .app-title {
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  margin: 0 0 0.35rem 0;
+  margin: 0;
   color: var(--text-primary);
   line-height: 1.2;
 }
-
-.app-tagline {
-  font-size: 0.92rem;
-  color: var(--text-secondary);
-  margin: 0;
-  line-height: 1.4;
-  max-width: 380px;
-}
-
 /* Hidden Inputs */
 .hidden-input {
   position: absolute;

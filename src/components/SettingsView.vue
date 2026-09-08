@@ -219,6 +219,9 @@ function handleProgress(payload: DownloadProgressPayload) {
   } else if (payload.status === "error") {
     delete activeDownloads.value[payload.model_id];
     actionError.value = payload.error || "An error occurred during download.";
+    if ((payload.error || "").toLowerCase().includes("insufficient disk space")) {
+      emit("update:parsingMode", "simple");
+    }
     loadData();
   }
 }
@@ -245,7 +248,11 @@ async function handleDownload(modelId: string) {
   } catch (err) {
     delete activeDownloads.value[modelId];
     if (model) model.is_downloading = false;
-    actionError.value = `Download failed: ${err instanceof Error ? err.message : String(err)}`;
+    const errMsg = err instanceof Error ? err.message : String(err);
+    actionError.value = `Download failed: ${errMsg}`;
+    if (errMsg.toLowerCase().includes("insufficient disk space")) {
+      emit("update:parsingMode", "simple");
+    }
   }
 }
 
@@ -330,6 +337,18 @@ async function handleOpenStorageLocation() {
 }
 
 function setMode(mode: ParsingMode) {
+  if (mode === "enhanced" && readyModelCount.value === 0 && defaultModel.value) {
+    const reqBytes = Math.round(defaultModel.value.size_bytes * 1.5);
+    const free = storageInfo.value?.free_disk_space_bytes;
+    if (typeof free === "number" && free < reqBytes) {
+      actionError.value = `Insufficient disk space to download default AI model (${formatBytes(free)} free, ${formatBytes(reqBytes)} required). Remaining in Simple Mode.`;
+      emit("update:parsingMode", "simple");
+      return;
+    }
+    if (!defaultModel.value.is_downloading && !defaultModel.value.is_downloaded) {
+      handleDownload(defaultModel.value.id);
+    }
+  }
   emit("update:parsingMode", mode);
 }
 </script>
@@ -605,7 +624,7 @@ function setMode(mode: ParsingMode) {
                 <span class="choice-symbol">⚡</span>
                 <div>
                   <h3 class="choice-title">Simple Mode</h3>
-                  <span class="choice-tagline">Fast & Lightweight Rules</span>
+                  <span class="choice-tagline">Fast & Lightweight Rules (Fallback)</span>
                 </div>
               </div>
 
@@ -620,6 +639,7 @@ function setMode(mode: ParsingMode) {
             </p>
 
             <div class="choice-tags-row">
+              <span class="choice-pill">⚡ Fallback</span>
               <span class="choice-pill">⚡ Instant</span>
               <span class="choice-pill">📦 0 MB Download</span>
               <span class="choice-pill">📄 Clean text & tables</span>
@@ -642,7 +662,7 @@ function setMode(mode: ParsingMode) {
                 <span class="choice-symbol">🧠</span>
                 <div>
                   <h3 class="choice-title">Enhanced Mode</h3>
-                  <span class="choice-tagline">Local On-Device AI</span>
+                  <span class="choice-tagline">Local On-Device AI (Default)</span>
                 </div>
               </div>
 
@@ -657,6 +677,7 @@ function setMode(mode: ParsingMode) {
             </p>
 
             <div class="choice-tags-row">
+              <span class="choice-pill">🧠 Default</span>
               <span class="choice-pill">🧠 AI Reasoning</span>
               <span class="choice-pill">🔒 100% Private</span>
               <span class="choice-pill">🎨 Complex flyers</span>
@@ -693,12 +714,12 @@ function setMode(mode: ParsingMode) {
               or downloads are required.
             </template>
             <template v-else-if="readyModelCount > 0">
-              Scans will use your downloaded on-device model for intelligent event extraction with
-              zero data leaving your device.
+              Enhanced Mode (Default) is active. Scans will use your downloaded on-device model for
+              intelligent event extraction with zero data leaving your device.
             </template>
             <template v-else>
-              Enhanced mode is selected, but no model is downloaded yet. Download the recommended
-              model below to enable on-device AI parsing.
+              Enhanced Mode is the default. Scans will automatically fall back to fast Simple Mode
+              until the on-device AI model finishes downloading.
             </template>
           </p>
         </div>

@@ -176,7 +176,7 @@
 /* Small Screens Optimization (iPhone SE, 375px or narrower) */
 @media (max-width: 380px) {
   .app-title {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
   .preview-file-name {
     max-width: 140px;

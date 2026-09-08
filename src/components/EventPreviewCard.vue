@@ -56,7 +56,7 @@ const overallConfidence = computed(() => {
   return Math.round((sum / props.events.length) * 100);
 });
 
-const previewMode = ref<"week" | "details">("week");
+const previewMode = ref<"week" | "details">("details");
 
 const weekStartKey = computed(() => {
   const eventDateKeys = props.events

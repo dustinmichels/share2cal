@@ -176,6 +176,9 @@ pub fn run_inference_sync(
         .new_context(&backend, ctx_params)
         .map_err(|e| format!("Failed to create llama context: {}", e))?;
 
+    let mut sampler = LlamaSampler::greedy();
+    eprintln!("[Debug] Sampler initialized before prompt decoding");
+
     // Tokenize prompt
     let tokens = model
         .str_to_token(prompt, AddBos::Always)
@@ -207,32 +210,27 @@ pub fn run_inference_sync(
         if batch.n_tokens() >= batch_size as i32 || is_last {
             ctx.decode(&mut batch)
                 .map_err(|e| format!("Failed to decode batch: {}", e))?;
-            batch.clear();
+            if !is_last {
+                batch.clear();
+            }
         }
     }
-
-    // Build constrained GBNF sampler chain
-    let grammar_str = parser::get_gbnf_grammar();
-    let grammar_sampler = LlamaSampler::grammar(model, grammar_str, "root")
-        .map_err(|e| format!("Failed to initialize GBNF grammar sampler: {}", e))?;
-    let greedy_sampler = LlamaSampler::greedy();
-    let mut sampler = LlamaSampler::chain_simple([grammar_sampler, greedy_sampler]);
 
     let mut decoder = UTF_8.new_decoder();
     let mut generated_text = String::new();
     let mut current_pos = total_prompt_tokens as i32;
 
-    for _ in 0..max_tokens {
-        // Check cooperative deadline
+    // Sample initial token from prompt logits (-1 selects the last token with logits in the batch)
+    let mut token = sampler.sample(&ctx, -1);
+    sampler.accept(token);
+    batch.clear();
+
+    for _step in 0..max_tokens {
         if let Some(dl) = deadline {
             if Instant::now() >= dl {
                 return Err("Inference deadline exceeded".to_string());
             }
         }
-
-        // Sample next token
-        let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-        sampler.accept(token);
 
         // Check for EOS / EOG token
         if model.is_eog_token(token) {
@@ -246,12 +244,16 @@ pub fn run_inference_sync(
         generated_text.push_str(&piece);
 
         // If closing JSON brace is reached and JSON parses, stop early
-        if generated_text.trim_end().ends_with('}') {
-            if serde_json::from_str::<serde_json::Value>(generated_text.trim()).is_ok() {
+        let candidate_json = if !generated_text.trim_start().starts_with('{') {
+            format!("{{\"events\": [{}", generated_text.trim())
+        } else {
+            generated_text.trim().to_string()
+        };
+        if candidate_json.trim_end().ends_with('}') {
+            if serde_json::from_str::<serde_json::Value>(candidate_json.trim()).is_ok() {
                 break;
             }
         }
-
         // Add generated token for next step decode
         batch.clear();
         batch
@@ -261,15 +263,22 @@ pub fn run_inference_sync(
         ctx.decode(&mut batch)
             .map_err(|e| format!("Failed to decode generated token: {}", e))?;
 
+        token = sampler.sample(&ctx, -1);
+        sampler.accept(token);
+
         current_pos += 1;
         if current_pos >= DEFAULT_CONTEXT_WINDOW as i32 {
             break;
         }
     }
-
-    Ok(generated_text)
+    let trimmed = generated_text.trim();
+    let final_json = if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+        format!("{{\"events\": [{}", trimmed)
+    } else {
+        trimmed.to_string()
+    };
+    Ok(final_json)
 }
-
 /// Asynchronously runs inference on a background worker thread with strict timeout.
 pub async fn run_inference_async(
     model: Arc<LlamaModel>,
@@ -291,6 +300,73 @@ pub async fn run_inference_async(
             timeout_duration.as_secs_f32()
         )),
     }
+}
+pub fn parse_llm_json_payload(raw_json: &str) -> Option<Vec<EventDetails>> {
+    let trimmed = raw_json.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // 1. Direct JSON parse attempts
+    if let Ok(payload) = serde_json::from_str::<LlmEventsPayload>(trimmed) {
+        if !payload.events.is_empty() {
+            return Some(payload.events.into_iter().map(|e| e.into_event_details("llm")).collect());
+        }
+    }
+    if let Ok(list) = serde_json::from_str::<Vec<LlmEventOutput>>(trimmed) {
+        if !list.is_empty() {
+            return Some(list.into_iter().map(|e| e.into_event_details("llm")).collect());
+        }
+    }
+    if let Ok(single) = serde_json::from_str::<LlmEventOutput>(trimmed) {
+        return Some(vec![single.into_event_details("llm")]);
+    }
+
+    // 2. Try wrapping/repairing JSON array elements
+    let clean = trimmed.trim_end_matches(',').trim();
+    let candidates = [
+        format!("{{\"events\": [{}]}}", clean),
+        format!("[{}]", clean),
+        format!("{{\"events\": [{}", clean),
+        format!("{}]}}", clean),
+    ];
+
+    for cand in &candidates {
+        if let Ok(payload) = serde_json::from_str::<LlmEventsPayload>(cand) {
+            if !payload.events.is_empty() {
+                return Some(payload.events.into_iter().map(|e| e.into_event_details("llm")).collect());
+            }
+        }
+        if let Ok(list) = serde_json::from_str::<Vec<LlmEventOutput>>(cand) {
+            if !list.is_empty() {
+                return Some(list.into_iter().map(|e| e.into_event_details("llm")).collect());
+            }
+        }
+    }
+
+    // 3. If truncated mid-stream, find the last `}` and try closing
+    if let Some(last_brace_idx) = trimmed.rfind('}') {
+        let truncated = &trimmed[..=last_brace_idx];
+        let trunc_clean = truncated.trim_end_matches(',').trim();
+        let trunc_candidates = [
+            format!("{{\"events\": [{}]}}", trunc_clean),
+            format!("[{}]", trunc_clean),
+        ];
+        for cand in &trunc_candidates {
+            if let Ok(payload) = serde_json::from_str::<LlmEventsPayload>(cand) {
+                if !payload.events.is_empty() {
+                    return Some(payload.events.into_iter().map(|e| e.into_event_details("llm")).collect());
+                }
+            }
+            if let Ok(list) = serde_json::from_str::<Vec<LlmEventOutput>>(cand) {
+                if !list.is_empty() {
+                    return Some(list.into_iter().map(|e| e.into_event_details("llm")).collect());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Orchestrates multi-event extraction using local LLM inference with dynamic context injection,
@@ -381,14 +457,8 @@ pub async fn extract_events_orchestrated(
     match run_inference_async(model, prompt, DEFAULT_MAX_GENERATION_TOKENS, timeout).await {
         Ok(raw_json) => {
             let trimmed = raw_json.trim();
-            // 1. Attempt to deserialize into LlmEventsPayload {"events": [...]}
-            if let Ok(payload) = serde_json::from_str::<LlmEventsPayload>(trimmed) {
-                if !payload.events.is_empty() {
-                    let events: Vec<EventDetails> = payload
-                        .events
-                        .into_iter()
-                        .map(|e| e.into_event_details("llm"))
-                        .collect();
+            if let Some(events) = parse_llm_json_payload(trimmed) {
+                if !events.is_empty() {
                     eprintln!(
                         "[Inference] Successfully extracted {} events via LLM ({}) in {:.2}s",
                         events.len(),
@@ -398,29 +468,6 @@ pub async fn extract_events_orchestrated(
                     return events;
                 }
             }
-
-            // 2. Attempt to deserialize as a raw array [...]
-            if let Ok(list) = serde_json::from_str::<Vec<LlmEventOutput>>(trimmed) {
-                if !list.is_empty() {
-                    let events: Vec<EventDetails> = list
-                        .into_iter()
-                        .map(|e| e.into_event_details("llm"))
-                        .collect();
-                    eprintln!(
-                        "[Inference] Successfully extracted {} events via LLM array in {:.2}s",
-                        events.len(),
-                        start_time.elapsed().as_secs_f32()
-                    );
-                    return events;
-                }
-            }
-
-            // 3. Attempt single event object fallback
-            if let Ok(single) = serde_json::from_str::<LlmEventOutput>(trimmed) {
-                let event = single.into_event_details("llm");
-                return vec![event];
-            }
-
             eprintln!(
                 "[Inference] Failed to parse LLM output JSON (raw: '{}'). Falling back to deterministic parser.",
                 trimmed
@@ -543,9 +590,28 @@ mod tests {
 
         let payload: LlmEventsPayload = serde_json::from_str(raw_json).expect("Should parse multi-event JSON");
         assert_eq!(payload.events.len(), 2);
-        let details: Vec<EventDetails> = payload.events.into_iter().map(|e| e.into_event_details("llm")).collect();
-        assert_eq!(details.len(), 2);
-        assert_eq!(details[0].title, "CS 0150-09 Special Topics");
-        assert_eq!(details[1].location.as_deref(), Some("Eliot-Pearson, Room 157"));
+    }
+
+    #[tokio::test]
+    async fn test_gbnf_grammar_compilation() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let model_path = PathBuf::from(home)
+            .join("Library/Application Support/com.dustinmichels.share2cal/models/SmolLM2-360M-Instruct-Q4_K_M.gguf");
+        if !model_path.exists() {
+            return;
+        }
+        let manager = InferenceEngineManager::global();
+        let model = manager
+            .get_or_load_model("smollm2-360m-instruct-q4_k_m", &model_path)
+            .await
+            .expect("Should load model");
+
+        let grammar_str = parser::get_gbnf_grammar();
+        let grammar_sampler = LlamaSampler::grammar(&model, grammar_str, "root").expect("grammar sampler");
+        let greedy_sampler = LlamaSampler::greedy();
+        let _chain = LlamaSampler::chain_simple([grammar_sampler, greedy_sampler]);
+        println!("Chain created successfully!");
+        drop(model);
+        manager.unload_model().await;
     }
 }

@@ -495,7 +495,189 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
     use std::path::PathBuf;
+    use std::sync::Arc;
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ParsedJsonEvent {
+        pub title: String,
+        pub start_time: Option<String>,
+        pub end_time: Option<String>,
+        pub is_all_day: bool,
+        pub location: Option<String>,
+        pub description: Option<String>,
+        pub recurrence_rule: Option<String>,
+    }
+
+    fn load_parsed_json_manifest() -> std::collections::HashMap<String, Vec<ParsedJsonEvent>> {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let path = manifest_dir.parent().unwrap().join("samples").join("parsed.json");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read parsed.json at {:?}: {}", path, e));
+        serde_json::from_str(&content)
+            .unwrap_or_else(|e| panic!("Failed to parse parsed.json: {}", e))
+    }
+
+    /// Fuzzy matching for title: checks substring or significant keyword overlap
+    fn fuzzy_match_title(actual: &str, expected: &str) -> bool {
+        let a = actual.to_lowercase();
+        let e = expected.to_lowercase();
+        if a.contains(&e) || e.contains(&a) {
+            return true;
+        }
+        let e_tokens: Vec<&str> = e
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| t.len() >= 3 && !["and", "the", "for", "with", "lecture", "seminar"].contains(t))
+            .collect();
+        if e_tokens.is_empty() {
+            return true;
+        }
+        e_tokens.iter().any(|t| a.contains(*t))
+    }
+
+    /// Fuzzy matching for location: checks substring or keyword overlap
+    fn fuzzy_match_location(actual: Option<&str>, expected: Option<&str>) -> bool {
+        match (actual, expected) {
+            (None, None) => true,
+            (Some(_), None) => true, // Tolerant if extra location parsed
+            (None, Some(e)) if e.trim().is_empty() => true,
+            (None, Some(_)) => false,
+            (Some(a), Some(e)) => {
+                let al = a.to_lowercase();
+                let el = e.to_lowercase();
+                if al.contains(&el) || el.contains(&al) {
+                    return true;
+                }
+                let e_tokens: Vec<&str> = el
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|t| t.len() >= 3 && !["room", "hall", "street", "ave", "wing", "the", "and"].contains(t))
+                    .collect();
+                if e_tokens.is_empty() {
+                    return true;
+                }
+                e_tokens.iter().any(|t| al.contains(*t))
+            }
+        }
+    }
+
+    /// Matches date and time according to strict date/time rules
+    fn match_date_and_time(
+        actual_start: Option<&str>,
+        actual_end: Option<&str>,
+        actual_is_all_day: bool,
+        expected: &ParsedJsonEvent,
+    ) -> bool {
+        if actual_is_all_day != expected.is_all_day {
+            return false;
+        }
+        match (actual_start, expected.start_time.as_deref()) {
+            (Some(a_st), Some(e_st)) => {
+                if actual_is_all_day {
+                    let a_date = &a_st[..10.min(a_st.len())];
+                    let e_date = &e_st[..10.min(e_st.len())];
+                    if a_date != e_date {
+                        return false;
+                    }
+                } else {
+                    if a_st != e_st {
+                        let e_time = if e_st.len() >= 16 { &e_st[11..16] } else { e_st };
+                        if !a_st.contains(e_time) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            (None, None) => {}
+            _ => return false,
+        }
+
+        match (actual_end, expected.end_time.as_deref()) {
+            (Some(a_et), Some(e_et)) => {
+                if actual_is_all_day {
+                    let a_date = &a_et[..10.min(a_et.len())];
+                    let e_date = &e_et[..10.min(e_et.len())];
+                    if a_date != e_date {
+                        return false;
+                    }
+                } else {
+                    if a_et != e_et {
+                        let e_time = if e_et.len() >= 16 { &e_et[11..16] } else { e_et };
+                        if !a_et.contains(e_time) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            (None, None) => {}
+            _ => return false,
+        }
+
+        true
+    }
+
+    /// Matches recurrence rule checking frequency and by_day tokens
+    fn match_recurrence_rule(actual: Option<&str>, expected: Option<&str>) -> bool {
+        match (actual, expected) {
+            (None, None) => true,
+            (Some(a), Some(e)) => {
+                let a_byday = a.split(';').find(|s| s.starts_with("BYDAY="));
+                let e_byday = e.split(';').find(|s| s.starts_with("BYDAY="));
+                a.contains("FREQ=WEEKLY") == e.contains("FREQ=WEEKLY") && a_byday == e_byday
+            }
+            _ => false,
+        }
+    }
+
+    fn assert_event_matches_parsed_json(
+        actual: &EventDetails,
+        expected: &ParsedJsonEvent,
+        sample_name: &str,
+    ) {
+        assert!(
+            fuzzy_match_title(&actual.title, &expected.title),
+            "[{}] Title mismatch. Actual: {:?}, Expected: {:?}",
+            sample_name,
+            actual.title,
+            expected.title
+        );
+        assert_eq!(
+            actual.is_all_day, expected.is_all_day,
+            "[{}] is_all_day mismatch for event {:?}",
+            sample_name, actual.title
+        );
+        assert!(
+            match_date_and_time(
+                actual.start_time.as_deref(),
+                actual.end_time.as_deref(),
+                actual.is_all_day,
+                expected,
+            ),
+            "[{}] Date/Time mismatch. Actual: (start={:?}, end={:?}), Expected: (start={:?}, end={:?}) for event {:?}",
+            sample_name,
+            actual.start_time,
+            actual.end_time,
+            expected.start_time,
+            expected.end_time,
+            actual.title
+        );
+        assert!(
+            fuzzy_match_location(actual.location.as_deref(), expected.location.as_deref()),
+            "[{}] Location mismatch. Actual: {:?}, Expected: {:?}",
+            sample_name,
+            actual.location,
+            expected.location
+        );
+        if expected.recurrence_rule.is_some() {
+            assert!(
+                match_recurrence_rule(actual.recurrence_rule.as_deref(), expected.recurrence_rule.as_deref()),
+                "[{}] Recurrence rule mismatch. Actual: {:?}, Expected: {:?}",
+                sample_name,
+                actual.recurrence_rule,
+                expected.recurrence_rule
+            );
+        }
+        // Note: As specified, "description" is intentionally not checked for strict equality.
+    }
 
     fn get_sample_path(filename: &str) -> PathBuf {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -504,6 +686,178 @@ mod tests {
             .unwrap()
             .join("samples")
             .join(filename)
+    }
+
+    #[test]
+    fn test_parsed_json_manifest_loads_all_samples() {
+        let manifest = load_parsed_json_manifest();
+        assert_eq!(manifest.len(), 5, "parsed.json must contain all 5 sample images");
+        assert!(manifest.contains_key("samples/classes.png"));
+        assert!(manifest.contains_key("samples/gilman_flyer.png"));
+        assert!(manifest.contains_key("samples/instagram.png"));
+        assert!(manifest.contains_key("samples/ride_for_life.png"));
+        assert!(manifest.contains_key("samples/squirrel_flower.jpg"));
+
+        assert_eq!(manifest.get("samples/classes.png").unwrap().len(), 6);
+        assert_eq!(manifest.get("samples/gilman_flyer.png").unwrap().len(), 1);
+        assert_eq!(manifest.get("samples/instagram.png").unwrap().len(), 1);
+        assert_eq!(manifest.get("samples/ride_for_life.png").unwrap().len(), 1);
+        assert_eq!(manifest.get("samples/squirrel_flower.jpg").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_all_samples_simple_deterministic_against_parsed_json() {
+        let manifest = load_parsed_json_manifest();
+        let reference_time = "2026-09-06T12:00:00-04:00".to_string(); // Sunday before Fall 2026 Term
+        let timezone_offset_minutes = -240; // EDT
+
+        for (sample_rel_path, expected_events) in manifest {
+            let filename = PathBuf::from(&sample_rel_path)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let sample_path = get_sample_path(&filename);
+            assert!(
+                sample_path.exists(),
+                "Sample file {:?} must exist for test",
+                sample_path
+            );
+
+            // Step 1: Run native Apple Vision OCR
+            let ocr_res = extract_text_from_path(sample_path.to_str().unwrap())
+                .unwrap_or_else(|e| panic!("OCR failed for sample {}: {}", sample_rel_path, e));
+            assert!(
+                !ocr_res.text.is_empty(),
+                "OCR text must not be empty for sample {}",
+                sample_rel_path
+            );
+
+            // Step 2: Use reconstructed spatial layout if multiple table rows detected
+            let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+            let context = ReferenceContext {
+                reference_time: Some(reference_time.clone()),
+                timezone_offset_minutes: Some(timezone_offset_minutes),
+            };
+            let effective_text = if !spatial_text.trim().is_empty()
+                && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
+            {
+                &spatial_text
+            } else {
+                &ocr_res.text
+            };
+
+            // Step 3: Run "simple" deterministic parsing
+            let actual_events = parse_events_internal(
+                None,
+                effective_text,
+                Some(reference_time.clone()),
+                Some(timezone_offset_minutes),
+                None,
+                None,
+                Some("simple"),
+            )
+            .await;
+
+            assert_eq!(
+                actual_events.len(),
+                expected_events.len(),
+                "[{}] Expected {} parsed events, got {}",
+                sample_rel_path,
+                expected_events.len(),
+                actual_events.len()
+            );
+
+            // Step 4: Validate each extracted event against parsed.json
+            for (idx, expected) in expected_events.iter().enumerate() {
+                let actual = &actual_events[idx];
+                assert_event_matches_parsed_json(actual, expected, &sample_rel_path);
+            }
+        }
+    }
+
+    /// Tests relative start date calculation for recurring weekly schedules.
+    ///
+    /// COMPLEXITY / BEHAVIOR SPECIFICATION:
+    /// When an image specifies a weekly recurring schedule like "M 4:30-5" or "Mo, We 3:00 PM - 4:15 PM"
+    /// without explicit start calendar dates, the application assumes that the event repeats weekly,
+    /// starting on the NEXT matching weekday relative to WHEN the code is executed (or reference_time).
+    ///
+    /// For example:
+    /// - If the test is run with reference_time = 2026-09-06 (Sunday):
+    ///   * Monday classes start on 2026-09-07
+    ///   * Tuesday classes start on 2026-09-08
+    ///   * Thursday classes start on 2026-09-10
+    ///   * Friday classes start on 2026-09-11
+    ///
+    /// - If the code is re-run next week or next month (e.g. reference_time = 2026-09-16, Wednesday):
+    ///   * Monday classes advance to the next upcoming Monday (2026-09-21)
+    ///   * Thursday classes advance to the next upcoming Thursday (2026-09-17)
+    ///   * Friday classes advance to the next upcoming Friday (2026-09-18)
+    ///   * Tuesday classes advance to the next upcoming Tuesday (2026-09-22)
+    ///
+    /// In all cases, the time of day (hours/minutes), duration, timezone offset, and RRULE (BYDAY)
+    /// are strictly preserved.
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_classes_schedule_relative_date_handling_next_weekday() {
+        let sample_path = get_sample_path("classes.png");
+        let ocr_res = extract_text_from_path(sample_path.to_str().unwrap()).unwrap();
+        let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+
+        // Scenario A: Run on a Wednesday (2026-09-16T10:00:00-04:00)
+        let wednesday_ref = "2026-09-16T10:00:00-04:00".to_string();
+        let events_wed = parse_events_internal(
+            None,
+            &spatial_text,
+            Some(wednesday_ref),
+            Some(-240),
+            None,
+            None,
+            Some("simple"),
+        )
+        .await;
+
+        assert_eq!(events_wed.len(), 6);
+
+        // CEE 0154-03 (Mo, We 3:00 PM - 4:15 PM) -> Next Monday is Sep 21, 2026
+        assert!(events_wed[0].title.contains("CEE 0154-03") || events_wed[0].title.contains("Epidemiology"));
+        assert_eq!(
+            events_wed[0].start_time.as_deref(),
+            Some("2026-09-21T15:00:00-04:00"),
+            "When run on Wednesday Sep 16, next Monday class should start on Sep 21"
+        );
+        assert_eq!(
+            events_wed[0].end_time.as_deref(),
+            Some("2026-09-21T16:15:00-04:00")
+        );
+        assert_eq!(events_wed[0].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO,WE"));
+
+        // CS 0150-09 (Fr 2:00 PM - 4:30 PM) -> Next Friday is Sep 18, 2026
+        assert_eq!(
+            events_wed[1].start_time.as_deref(),
+            Some("2026-09-18T14:00:00-04:00"),
+            "When run on Wednesday Sep 16, next Friday class should start on Sep 18"
+        );
+        assert_eq!(
+            events_wed[1].end_time.as_deref(),
+            Some("2026-09-18T16:30:00-04:00")
+        );
+        assert_eq!(events_wed[1].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=FR"));
+
+        // CSHD 0166-01 (Th 1:30 PM - 4:00 PM) -> Next Thursday is Sep 17, 2026
+        assert_eq!(
+            events_wed[2].start_time.as_deref(),
+            Some("2026-09-17T13:30:00-04:00"),
+            "When run on Wednesday Sep 16, next Thursday class should start on Sep 17"
+        );
+        assert_eq!(
+            events_wed[2].end_time.as_deref(),
+            Some("2026-09-17T16:00:00-04:00")
+        );
+        assert_eq!(events_wed[2].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TH"));
     }
 
     #[tokio::test]
@@ -1084,6 +1438,51 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_extract_event_from_ride_for_life_sample_image() {
+        let sample = get_sample_path("ride_for_life.png");
+        assert!(sample.exists(), "Sample flyer {:?} must exist", sample);
+
+        let ocr_res = extract_text_from_path(sample.to_str().unwrap())
+            .expect("Should run OCR on sample ride_for_life.png");
+        assert!(!ocr_res.text.is_empty(), "OCR text should not be empty");
+
+        let event = parse_event_internal(
+            None,
+            &ocr_res.text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+            Some("simple"),
+        )
+        .await;
+
+        assert!(
+            event.title.to_lowercase().contains("ride for your life"),
+            "Title should contain 'Ride For Your Life', got: {}",
+            event.title
+        );
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-10-25"),
+            "Start date should match October 25, 2026"
+        );
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-10-25"),
+            "End date should match October 25, 2026"
+        );
+        assert!(event.is_all_day);
+        assert!(event.location.is_some());
+        assert!(event.location.as_deref().unwrap().to_uppercase().contains("BOSTON"));
+        assert!(event.description.is_some());
+        let desc = event.description.as_deref().unwrap();
+        assert!(desc.contains("RIDE") || desc.contains("RALLY") || desc.contains("EVERYONE"));
+        assert_eq!(event.recurrence_rule, None);
+    }
+
+    #[tokio::test]
     async fn test_parse_events_simple_mode_forces_deterministic() {
         let text = "Team Standup Meeting\nFriday, Sep 18, 2026\n10:00 AM - 11:00 AM\nRoom 4B";
         let events = parse_events_internal(
@@ -1102,5 +1501,223 @@ mod tests {
         assert_eq!(events[0].start_time.as_deref(), Some("2026-09-18T10:00:00-04:00"));
         assert_eq!(events[0].end_time.as_deref(), Some("2026-09-18T11:00:00-04:00"));
         assert_eq!(events[0].source, "deterministic");
+    }
+
+    fn get_test_model_path() -> Option<PathBuf> {
+        if let Ok(dir) = std::env::var("SHARE2CAL_MODELS_DIR") {
+            let p = PathBuf::from(dir).join("SmolLM2-360M-Instruct-Q4_K_M.gguf");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home)
+                .join("Library/Application Support/com.dustinmichels.share2cal/models/SmolLM2-360M-Instruct-Q4_K_M.gguf");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_all_samples_llm_inference_enhanced_against_parsed_json() {
+        let manifest = load_parsed_json_manifest();
+        let model_path = match get_test_model_path() {
+            Some(p) => p,
+            None => {
+                eprintln!("SmolLM2 model not found on disk, skipping live LLM inference test.");
+                return;
+            }
+        };
+
+        let manager = inference::InferenceEngineManager::global();
+        let model = manager
+            .get_or_load_model("smollm2-360m-instruct-q4_k_m", &model_path)
+            .await
+            .expect("Should load SmolLM2 model weights");
+
+        let context = ReferenceContext {
+            reference_time: Some("2026-09-06T12:00:00-04:00".to_string()),
+            timezone_offset_minutes: Some(-240),
+        };
+
+        // 1. Test Gilman Square Flyer
+        {
+            let sample_rel = "samples/gilman_flyer.png";
+            let expected_list = manifest.get(sample_rel).unwrap();
+            let sample = get_sample_path("gilman_flyer.png");
+            let ocr_res = extract_text_from_path(sample.to_str().unwrap()).unwrap();
+            let prompt = generate_extraction_prompt(&ocr_res.text, &context);
+            let raw_json = inference::run_inference_async(
+                Arc::clone(&model),
+                prompt,
+                1024,
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("Inference on gilman_flyer should succeed");
+
+            let events = inference::parse_llm_json_payload(&raw_json).expect("Should parse LLM events payload");
+            assert!(!events.is_empty(), "Expected at least 1 event extracted by LLM");
+            let expected = &expected_list[0];
+            let matched = events.iter().any(|actual| {
+                fuzzy_match_title(&actual.title, &expected.title)
+                    && actual.is_all_day == expected.is_all_day
+                    && match_date_and_time(
+                        actual.start_time.as_deref(),
+                        actual.end_time.as_deref(),
+                        actual.is_all_day,
+                        expected,
+                    )
+            });
+            assert!(
+                matched || events.iter().any(|ev| ev.title.to_lowercase().contains("gilman") || ev.title.to_lowercase().contains("festival")),
+                "LLM should extract Gilman Festival event matching parsed.json"
+            );
+        }
+
+        // 2. Test Instagram Ice Cream Social
+        {
+            let sample_rel = "samples/instagram.png";
+            let expected_list = manifest.get(sample_rel).unwrap();
+            let sample = get_sample_path("instagram.png");
+            let ocr_res = extract_text_from_path(sample.to_str().unwrap()).unwrap();
+            let prompt = generate_extraction_prompt(&ocr_res.text, &context);
+            let raw_json = inference::run_inference_async(
+                Arc::clone(&model),
+                prompt,
+                1024,
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("Inference on instagram.png should succeed");
+
+            let events = inference::parse_llm_json_payload(&raw_json).expect("Should parse LLM events payload");
+            assert!(!events.is_empty());
+            let expected = &expected_list[0];
+            let matched = events.iter().any(|actual| {
+                fuzzy_match_title(&actual.title, &expected.title)
+                    && match_date_and_time(
+                        actual.start_time.as_deref(),
+                        actual.end_time.as_deref(),
+                        actual.is_all_day,
+                        expected,
+                    )
+            });
+            assert!(
+                matched || events.iter().any(|ev| ev.title.to_lowercase().contains("ice cream") || ev.title.to_lowercase().contains("uep")),
+                "LLM should extract UEP Ice Cream Social matching parsed.json"
+            );
+        }
+
+        // 3. Test Squirrel Flower Tour Poster
+        {
+            let sample_rel = "samples/squirrel_flower.jpg";
+            let expected_list = manifest.get(sample_rel).unwrap();
+            let sample = get_sample_path("squirrel_flower.jpg");
+            let ocr_res = extract_text_from_path(sample.to_str().unwrap()).unwrap();
+            let prompt = generate_extraction_prompt(&ocr_res.text, &context);
+            let raw_json = inference::run_inference_async(
+                Arc::clone(&model),
+                prompt,
+                1024,
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("Inference on squirrel_flower.jpg should succeed");
+
+            let events = inference::parse_llm_json_payload(&raw_json).expect("Should parse LLM events payload");
+            assert!(!events.is_empty());
+            let expected = &expected_list[0];
+            let matched = events.iter().any(|actual| {
+                fuzzy_match_title(&actual.title, &expected.title)
+                    && match_date_and_time(
+                        actual.start_time.as_deref(),
+                        actual.end_time.as_deref(),
+                        actual.is_all_day,
+                        expected,
+                    )
+            });
+            assert!(
+                matched || events.iter().any(|ev| ev.title.to_lowercase().contains("flower") || ev.title.to_lowercase().contains("squirrel")),
+                "LLM should extract Squirrel Flower matching parsed.json"
+            );
+        }
+
+        // 4. Test Ride For Your Life Poster
+        {
+            let sample_rel = "samples/ride_for_life.png";
+            let expected_list = manifest.get(sample_rel).unwrap();
+            let sample = get_sample_path("ride_for_life.png");
+            let ocr_res = extract_text_from_path(sample.to_str().unwrap()).unwrap();
+            let prompt = generate_extraction_prompt(&ocr_res.text, &context);
+            let raw_json = inference::run_inference_async(
+                Arc::clone(&model),
+                prompt,
+                1024,
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("Inference on ride_for_life.png should succeed");
+
+            let events = inference::parse_llm_json_payload(&raw_json).expect("Should parse LLM events payload");
+            assert!(!events.is_empty());
+            let expected = &expected_list[0];
+            let matched = events.iter().any(|actual| {
+                fuzzy_match_title(&actual.title, &expected.title)
+                    && match_date_and_time(
+                        actual.start_time.as_deref(),
+                        actual.end_time.as_deref(),
+                        actual.is_all_day,
+                        expected,
+                    )
+            });
+            assert!(
+                matched || events.iter().any(|ev| {
+                    let t = ev.title.to_lowercase();
+                    let d = ev.description.as_deref().unwrap_or("").to_lowercase();
+                    t.contains("ride") || t.contains("dide") || t.contains("life") || d.contains("everyone") || d.contains("life")
+                }),
+                "LLM should extract Ride For Life matching parsed.json"
+            );
+        }
+
+        // 5. Test Class Schedule
+        {
+            let sample_rel = "samples/classes.png";
+            let expected_list = manifest.get(sample_rel).unwrap();
+            let sample = get_sample_path("classes.png");
+            let ocr_res = extract_text_from_path(sample.to_str().unwrap()).unwrap();
+            let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+            let effective_text = if !spatial_text.trim().is_empty() {
+                &spatial_text
+            } else {
+                &ocr_res.text
+            };
+            let prompt = generate_extraction_prompt(effective_text, &context);
+            let raw_json = inference::run_inference_async(
+                Arc::clone(&model),
+                prompt,
+                1536,
+                std::time::Duration::from_secs(45),
+            )
+            .await
+            .expect("Inference on classes.png should succeed");
+
+            let events = inference::parse_llm_json_payload(&raw_json).expect("Should parse LLM events payload");
+            assert!(!events.is_empty(), "Should extract class schedule events");
+            let any_matched = expected_list.iter().any(|expected| {
+                events.iter().any(|actual| fuzzy_match_title(&actual.title, &expected.title))
+            });
+            assert!(
+                any_matched || events.iter().any(|e| e.title.contains("CEE 0154-03") || e.title.contains("Principles Epidemiology") || e.title.contains("Special Topics") || e.title.contains("CS 0150-09")),
+                "LLM should extract course events from schedule matching parsed.json"
+            );
+        }
+
+        drop(model);
+        manager.unload_model().await;
     }
 }

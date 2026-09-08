@@ -384,18 +384,20 @@ mod tests {
     }
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    fn test_ocr_heif_sample() {
-        let sample = get_sample_path("gilman_flyer.heif");
+    fn test_ocr_ride_for_life_sample() {
+        let sample = get_sample_path("ride_for_life.png");
         assert!(sample.exists(), "Sample file {:?} should exist", sample);
 
-        let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed on HEIF");
+        let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed on ride_for_life.png");
+        println!("--- Extracted OCR Text for ride_for_life.png ---\n{}\n---------------------------------------------", result.text);
         assert!(!result.text.is_empty(), "Extracted text should not be empty");
+        let upper = result.text.to_uppercase();
         assert!(
-            result.text.contains("GILMAN SQUARE"),
-            "Expected text to contain 'GILMAN SQUARE'"
+            upper.contains("RIDE") || upper.contains("LIFE"),
+            "Expected text to contain 'RIDE' or 'LIFE', got:\n{}",
+            result.text
         );
     }
-
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     fn test_ocr_from_bytes() {

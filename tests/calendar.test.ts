@@ -179,6 +179,26 @@ describe("Calendar Service & Google Calendar Integration", () => {
       expect(url.searchParams.get("location")).toBe("Crystal Ballroom, Somerville, MA");
       expect(url.searchParams.get("details")).toBe("2026 Tour");
     });
+
+    it("generates a valid Google Calendar URL for Ride For Your Life advocacy event sample", () => {
+      const event: EventDetails = {
+        title: "Ride For Your Life - Boston",
+        start_time: "2026-10-25",
+        end_time: "2026-10-25",
+        is_all_day: true,
+        location: "Boston, MA",
+        description:
+          'RIDE. WALK. RALLY. Motto: "OUR STREETS EXIST For EVERYONE". Memorial and safe streets advocacy event.',
+        confidence: 0.95,
+        source: "flyer_scan",
+      };
+      const urlString = generateGoogleCalendarUrl(event);
+      const url = new URL(urlString);
+      expect(url.searchParams.get("text")).toBe("Ride For Your Life - Boston");
+      expect(url.searchParams.get("dates")).toBe("20261025/20261026");
+      expect(url.searchParams.get("location")).toBe("Boston, MA");
+      expect(url.searchParams.get("details")).toContain("RIDE. WALK. RALLY.");
+    });
   });
 
   describe("Settings & Calendar Preferences Persistence", () => {

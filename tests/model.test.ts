@@ -1,5 +1,11 @@
-import { describe, it, expect } from "bun:test";
-import { formatBytes, formatSpeed, isDesktopDevice } from "../src/services/model";
+import { describe, it, expect, beforeEach } from "bun:test";
+import {
+  formatBytes,
+  formatSpeed,
+  isDesktopDevice,
+  checkDiskSpaceAndAutoDownloadDefaultModel,
+} from "../src/services/model";
+import { setStoredParsingMode, getStoredParsingMode } from "../src/services/settings";
 import manifest from "../model-manifest.json";
 
 describe("Model Service & Manifest", () => {
@@ -44,5 +50,29 @@ describe("Model Service & Manifest", () => {
 
   it("correctly identifies desktop vs mobile environments", () => {
     expect(typeof isDesktopDevice()).toBe("boolean");
+  });
+
+  it("returns disabled reason when stored mode is 'simple'", async () => {
+    setStoredParsingMode("simple");
+    const res = await checkDiskSpaceAndAutoDownloadDefaultModel();
+    expect(res.triggered).toBe(false);
+    expect(res.mode).toBe("simple");
+    expect(res.reason).toBe("disabled");
+  });
+
+  it("checks disk space and attempts download when stored mode is 'enhanced'", async () => {
+    setStoredParsingMode("enhanced");
+    const res = await checkDiskSpaceAndAutoDownloadDefaultModel();
+    expect(res.modelId).toBe("smollm2-360m-instruct-q4_k_m");
+    expect([
+      "already_ready",
+      "already_downloading",
+      "download_started",
+      "insufficient_space",
+      "error",
+    ]).toContain(res.reason!);
+    if (res.reason === "insufficient_space") {
+      expect(getStoredParsingMode()).toBe("simple");
+    }
   });
 });

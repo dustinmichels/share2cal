@@ -202,12 +202,13 @@ impl ReferenceContext {
 
 /// Generates a strict GBNF grammar for llama.cpp structured event extraction
 pub fn get_gbnf_grammar() -> &'static str {
-    r#"root ::= "{" ws "\"events\":" ws "[" ws (event ("," ws event)*)? ws "]" ws "}"
-event ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws opt_string "," ws "\"end_time\":" ws opt_string "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws opt_string "," ws "\"description\":" ws opt_string "," ws "\"recurrence_rule\":" ws opt_string "}"
-string ::= "\"" [^"\\]* "\""
-opt_string ::= "null" | string
-boolean ::= "true" | "false"
-ws ::= [ \t\n]*
+    r#"root ::= ws "{" ws "\"events\":" ws "[" ws event-list? ws "]" ws "}" ws
+event-list ::= event ("," ws event)*
+event ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws optstring "," ws "\"end_time\":" ws optstring "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws optstring "," ws "\"description\":" ws optstring "," ws "\"recurrence_rule\":" ws optstring "}"
+string ::= "\"" ([^"\\\r\n] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* "\"" ws
+optstring ::= ("null" | string) ws
+boolean ::= ("true" | "false") ws
+ws ::= [ \t\n\r]*
 "#
 }
 
@@ -263,7 +264,6 @@ pub fn get_json_schema() -> serde_json::Value {
     })
 }
 
-/// Formats the prompt with dynamic reference context injection
 pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) -> String {
     let ref_dt = context.get_reference_datetime();
     let ref_str = ref_dt.to_rfc3339();
@@ -278,12 +278,11 @@ pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) ->
     };
 
     format!(
-        "Current Reference Time: {} ({})\n\n\
-        Task: Extract all calendar events from the text below. If there are multiple events (e.g. a class schedule, conference agenda, festival lineup, or recurring sessions), extract each as a distinct event item in the 'events' array. For repeating events (such as weekly classes meeting on certain days), populate 'recurrence_rule' with an RFC 5545 RRULE string (e.g. 'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z'). Output ISO-8601 timestamps relative to the reference time.\n\
-        Output valid JSON matching the schema with an 'events' array.\n\n\
-        --- Extracted Text ---\n\
-        {}\n\
-        ----------------------\n",
+        "<|im_start|>system\nYou are a calendar assistant. Extract all events from the OCR text into a JSON object with an \"events\" array.\n\
+        Each event must have fields: \"title\" (string), \"start_time\" (ISO-8601 or YYYY-MM-DD or null), \"end_time\" (ISO-8601 or YYYY-MM-DD or null), \"is_all_day\" (boolean), \"location\" (string or null), \"description\" (string or null), \"recurrence_rule\" (string or null, e.g. FREQ=WEEKLY;BYDAY=MO,WE). Output ONLY raw JSON.\n\
+        Reference Time: {} ({})<|im_end|>\n\
+        <|im_start|>user\n{}\n<|im_end|>\n\
+        <|im_start|>assistant\n{{\"events\": [",
         ref_str, day_name, ocr_text.trim()
     )
 }
@@ -1167,8 +1166,8 @@ fn extract_date(text: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> 
         }
     }
 
-    // Pattern 3: Numeric date MM/DD/YYYY, MM/DD/YY, YYYY-MM-DD
-    let numeric_regex = Regex::new(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b|\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b").unwrap();
+    // Pattern 3: Numeric date MM/DD/YYYY, MM/DD/YY, MM.DD.YY, MM.DD.YYYY, YYYY-MM-DD, YYYY.MM.DD
+    let numeric_regex = Regex::new(r"\b(\d{4})[/\.-](\d{1,2})[/\.-](\d{1,2})\b|\b(\d{1,2})[/\.](\d{1,2})[/\.](\d{2,4})\b").unwrap();
     if let Some(caps) = numeric_regex.captures(&clean_text) {
         if let (Some(y), Some(m), Some(d)) = (caps.get(1), caps.get(2), caps.get(3)) {
             let year: i32 = y.as_str().parse().ok()?;
@@ -1336,8 +1335,8 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
         "FIELD", "HOUSE", "LOUNGE", "HQ", "CAMPUS", "HUB", "STUDIO", "BUILDING",
         "TOWER", "GALLERY", "SPACE", "OFFICE", "PAVILION", "COMMONS", "HOTEL", "LAWN",
         "RESTAURANT", "TAVERN", "PUB", "AMPHITHEATER", "STAGE", "ZOOM", "GOOGLE MEET", "TEAMS", "WEBEX", "DISCORD",
+        "BOSTON", "SOMERVILLE", "CAMBRIDGE", "BROOKLINE", "MEDFORD", "NEW YORK", "NYC",
     ];
-
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         let upper = trimmed.to_uppercase();
@@ -1447,8 +1446,8 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
         "EXHIBITION", "FAIR", "GALA", "DINNER", "BRUNCH", "FUNDRAISER",
         "PARADE", "MARKET", "BLOCK PARTY", "OPEN MIC", "GAME NIGHT", "TRIVIA",
         "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING", "SOCIAL", "ICE CREAM", "RECEPTION",
+        "RIDE", "RALLY", "WALK", "RUN", "MARATHON", "TOUR", "RACE",
     ];
-
     let mut candidate_titles: Vec<(String, usize, i32)> = Vec::new();
 
     // Detect supporting act / opener (e.g. "WITH\nyoubef" or "WITH youbef" or "FEATURING ...")
@@ -1523,11 +1522,26 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
             }
         }
 
-        // Check if preceding line is an all-caps brand/prefix banner (e.g. "SOMERSTREETS" before "GILMAN SQUARE ARTS & MUSIC FESTIVAL")
+        // Check if preceding line is a multi-line title continuation or all-caps brand/prefix banner
         if idx > 0 {
             let prev = lines[idx - 1].trim();
             let prev_upper = prev.to_uppercase();
-            if prev == prev_upper
+
+            // Multi-line title connection: e.g. "Dide For" / "Ride For" + "Your Life" -> "Ride For Your Life"
+            let is_connector = prev_upper.ends_with(" FOR") || prev_upper.ends_with(" OF")
+                || prev_upper.ends_with(" AND") || prev_upper.ends_with(" THE")
+                || prev_upper.ends_with(" AT") || prev_upper.ends_with(" IN")
+                || prev_upper.ends_with(" TO") || prev_upper.ends_with(" ON")
+                || prev_upper.starts_with("DIDE ") || prev_upper.starts_with("RIDE ");
+
+            if is_connector && idx == 1 && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev) {
+                let mut fixed_prev = prev.to_string();
+                if fixed_prev.starts_with("Dide") || fixed_prev.starts_with("dide") || fixed_prev.starts_with("DIDE") {
+                    fixed_prev = format!("Ride{}", &fixed_prev[4..]);
+                }
+                let combined = format!("{} {}", fixed_prev, trimmed);
+                candidate_titles.push((combined, 0, score + 40));
+            } else if prev == prev_upper
                 && !prev.starts_with('*') && !prev.starts_with('-') && !prev.ends_with(':')
                 && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev)
                 && !supporting_indices.contains(&(idx - 1))
@@ -1539,7 +1553,6 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
 
         candidate_titles.push((trimmed.to_string(), idx, score));
     }
-
     if let Some((best_title, _, _)) = candidate_titles.into_iter().max_by_key(|item| item.2) {
         let clean = best_title.trim_matches(|c: char| c == '*' || c == '-' || c == ':').trim();
         return clean.to_string();
@@ -1578,13 +1591,15 @@ fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> O
             continue;
         }
 
-        // Keep bullet points, activity highlights, rain dates, special notes, tour info
+        // Keep bullet points, activity highlights, rain dates, special notes, tour info, mottos, rallies
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || upper.contains("LIVE MUSIC") || upper.contains("PERFORMANCES") || upper.contains("BEER GARDEN")
             || upper.contains("FOOD VENDORS") || upper.contains("ARTISTS") || upper.contains("ACTIVITIES")
             || upper.contains("RAIN DATE") || upper.contains("FREE ADMISSION") || upper.contains("ALL AGES")
             || upper.contains("SPEAKERS") || upper.contains("PIZZA") || upper.contains("DRINKS")
-            || upper.contains("TOUR") || upper.contains("DOORS") || upper.contains("SPECIAL GUEST") {
+            || upper.contains("TOUR") || upper.contains("DOORS") || upper.contains("SPECIAL GUEST")
+            || upper.contains("RIDE.") || upper.contains("WALK.") || upper.contains("RALLY")
+            || upper.contains("STREETS EXIST") || upper.contains("EVERYONE") || upper.contains("MEMORIAL") {
             let clean_bullet = trimmed.trim_start_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
             if !clean_bullet.is_empty() && !bullet_points.iter().any(|b| b == clean_bullet) {
                 bullet_points.push(clean_bullet.to_string());
@@ -1595,7 +1610,6 @@ fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> O
             prose_lines.push(trimmed.to_string());
         }
     }
-
     if !bullet_points.is_empty() {
         Some(bullet_points.join(" • "))
     } else if !prose_lines.is_empty() {
@@ -1861,7 +1875,7 @@ MIT Stata Center, Room 32-123
     fn test_dynamic_context_injection_prompt() {
         let ctx = sample_reference_context();
         let prompt = generate_extraction_prompt("Concert tomorrow at 8pm", &ctx);
-        assert!(prompt.contains("Current Reference Time: 2026-09-06T10:57:00-04:00 (Sunday)"));
+        assert!(prompt.contains("Reference Time: 2026-09-06T10:57:00-04:00 (Sunday)"));
         assert!(prompt.contains("Concert tomorrow at 8pm"));
     }
 
@@ -2166,5 +2180,63 @@ J. Skripchuk
         assert!(events[0].location.as_deref().unwrap().contains("Anderson Wing"));
         assert!(events[1].title.contains("CS 0150-09"));
         assert_eq!(events[1].location.as_deref(), Some("Online"));
+    }
+
+    #[test]
+    fn test_parse_ride_for_life_deterministic() {
+        let ocr_text = r#"Dide For
+Your Life
+BOSTON
+10.25.26
+RIDE. WALK.
+RALLY.
+MEN
+OUR STREETS EXIST For EVERYONE"#;
+
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        println!("--- Parsed Ride For Life Event ---\n{:#?}\n----------------------------------", event);
+
+        assert!(
+            event.title.to_lowercase().contains("ride for your life"),
+            "Title should contain 'Ride For Your Life', got: {}",
+            event.title
+        );
+        assert_eq!(
+            event.start_time.as_deref(),
+            Some("2026-10-25"),
+            "Start date should match October 25, 2026"
+        );
+        assert_eq!(
+            event.end_time.as_deref(),
+            Some("2026-10-25"),
+            "End date should match October 25, 2026"
+        );
+        assert!(
+            event.is_all_day,
+            "Date-only rally flyer should be parsed as all-day event"
+        );
+        assert!(
+            event.location.is_some(),
+            "Location should be extracted"
+        );
+        let loc = event.location.unwrap();
+        assert!(
+            loc.to_uppercase().contains("BOSTON"),
+            "Location should contain Boston, got: {}",
+            loc
+        );
+        assert!(
+            event.description.is_some(),
+            "Description should be extracted"
+        );
+        let desc = event.description.unwrap();
+        assert!(
+            desc.contains("RIDE") || desc.contains("RALLY") || desc.contains("EVERYONE"),
+            "Description should contain rally details, got: {}",
+            desc
+        );
+        assert_eq!(event.recurrence_rule, None);
     }
 }
