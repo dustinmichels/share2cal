@@ -10,6 +10,8 @@ import {
   downloadMultiIcsFile,
   addEventToNativeCalendar,
   addEventsToNativeCalendar,
+  getAvailableCalendars,
+  openInGoogleCalendar,
   formatDateForDisplay,
   formatTimeForDisplay,
   extractDateInput,
@@ -17,6 +19,7 @@ import {
   buildIsoFromDateTime,
   type EventDetails,
   type EventFormData,
+  type CalendarInfo,
 } from "./services/event";
 import {
   getPendingSharedImage,
@@ -25,7 +28,14 @@ import {
   loadImageFromPath,
 } from "./services/share";
 import { getModelStatuses, type ModelStatus } from "./services/model";
-import { getStoredParsingMode, setStoredParsingMode, type ParsingMode } from "./services/settings";
+import {
+  getStoredParsingMode,
+  setStoredParsingMode,
+  getStoredDefaultCalendarId,
+  getStoredDefaultTarget,
+  type ParsingMode,
+  type CalendarTarget,
+} from "./services/settings";
 import UploadHub from "./components/UploadHub.vue";
 import ImagePreviewCard from "./components/ImagePreviewCard.vue";
 import EventPreviewCard from "./components/EventPreviewCard.vue";
@@ -70,6 +80,23 @@ const addedEventIndices = ref<Set<number>>(new Set());
 const shareNotification = ref<string | null>(null);
 const isFromShareExtension = ref(false);
 const copiedSummary = ref(false);
+
+const availableCalendars = ref<CalendarInfo[]>([]);
+const selectedCalendarId = ref<string>(getStoredDefaultCalendarId() || "");
+const defaultCalendarTarget = ref<CalendarTarget>(getStoredDefaultTarget());
+
+async function refreshCalendars() {
+  try {
+    defaultCalendarTarget.value = getStoredDefaultTarget();
+    availableCalendars.value = await getAvailableCalendars();
+    const storedId = getStoredDefaultCalendarId();
+    if (storedId) {
+      selectedCalendarId.value = storedId;
+    }
+  } catch (err) {
+    console.warn("Failed to refresh calendars in App:", err);
+  }
+}
 
 const isWindowDragging = ref(false);
 let unlistenDragDrop: (() => void) | null = null;
@@ -370,7 +397,10 @@ async function handleBatchAddToCalendar() {
   calendarDownloaded.value = false;
 
   try {
-    const result = await addEventsToNativeCalendar(eventsList.value);
+    const result = await addEventsToNativeCalendar(
+      eventsList.value,
+      selectedCalendarId.value || undefined,
+    );
     if (result.success || result.addedCount > 0) {
       const newSet = new Set<number>();
       for (let i = 0; i < eventsList.value.length; i++) {
@@ -418,7 +448,10 @@ async function handleSingleAddToCalendar() {
   calendarDownloaded.value = false;
 
   try {
-    const result = await addEventToNativeCalendar(event);
+    const result = await addEventToNativeCalendar(
+      event,
+      selectedCalendarId.value || undefined,
+    );
     if (result.success) {
       if (selectedEventIndex.value !== null) {
         addedEventIndices.value.add(selectedEventIndex.value);
@@ -440,6 +473,29 @@ async function handleSingleAddToCalendar() {
     downloadIcsFile(event);
   } finally {
     isAddingToCalendar.value = false;
+  }
+}
+
+async function handleOpenGoogleCalendar(index?: number) {
+  const targetEvent =
+    index !== undefined && eventsList.value[index]
+      ? eventsList.value[index]
+      : selectedEventIndex.value !== null
+        ? getComposedEvent()
+        : eventsList.value[0];
+  if (!targetEvent) return;
+
+  try {
+    await openInGoogleCalendar(targetEvent);
+    calendarSuccessMessage.value = `Opening "${targetEvent.title}" in Google Calendar...`;
+    setTimeout(() => {
+      calendarSuccessMessage.value = null;
+    }, 4000);
+  } catch (err) {
+    calendarErrorMessage.value = `Could not open Google Calendar: ${String(err)}`;
+    setTimeout(() => {
+      calendarErrorMessage.value = null;
+    }, 5000);
   }
 }
 
@@ -580,6 +636,7 @@ onMounted(() => {
   setupDragDrop();
   checkPendingShare();
   refreshModelStatus();
+  refreshCalendars();
 });
 
 onUnmounted(() => {
@@ -861,12 +918,16 @@ onUnmounted(() => {
         <!-- PREVIEW VIEW: Event Summary / List of Events -->
         <EventPreviewCard
           v-else-if="eventsList.length > 0 && selectedEventIndex === null"
+          v-model:selected-calendar-id="selectedCalendarId"
           :events="eventsList"
+          :available-calendars="availableCalendars"
+          :default-target="defaultCalendarTarget"
           :is-adding-to-calendar="isAddingToCalendar"
           :copied-summary="copiedSummary"
           :added-indices="addedEventIndices"
           @edit-event="openEditScreen"
           @add-to-calendar="handleBatchAddToCalendar"
+          @open-google-calendar="handleOpenGoogleCalendar"
           @export-ics="handleExportIcs"
           @copy-summary="copySummary"
           @remove-event="handleRemoveEvent"
@@ -876,13 +937,17 @@ onUnmounted(() => {
         <EventFormCard
           v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
           v-model="eventForm"
+          v-model:selected-calendar-id="selectedCalendarId"
           :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
+          :available-calendars="availableCalendars"
+          :default-target="defaultCalendarTarget"
           :is-adding-to-calendar="isAddingToCalendar"
           :copied-summary="copiedSummary"
           :current-index="selectedEventIndex"
           :total-events="eventsList.length"
           @back="closeEditScreen"
           @add-to-calendar="handleSingleAddToCalendar"
+          @open-google-calendar="() => handleOpenGoogleCalendar(selectedEventIndex ?? undefined)"
           @export-ics="handleSingleExportIcs"
           @copy-summary="copySingleSummary"
           @remove="handleRemoveCurrentEvent"
@@ -908,8 +973,8 @@ onUnmounted(() => {
         v-else-if="currentView === 'settings'"
         :parsing-mode="parsingMode"
         @update:parsing-mode="updateParsingMode"
-        @back="currentView = 'main'"
-        @models-updated="refreshModelStatus"
+        @back="currentView = 'main'; refreshCalendars();"
+        @models-updated="() => { refreshModelStatus(); refreshCalendars(); }"
       />
 
       <!-- Drop Overlay for when an image is already selected or on other views -->

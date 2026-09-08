@@ -302,9 +302,13 @@ pub async fn extract_events_orchestrated(
     model_id_override: Option<&str>,
     timeout_secs: Option<u64>,
 ) -> Vec<EventDetails> {
+    let schedule_events = parser::parse_schedule_table_events(ocr_text, context);
+    if schedule_events.len() >= 2 {
+        return schedule_events;
+    }
+
     let start_time = Instant::now();
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_INFERENCE_TIMEOUT_SECS));
-
     // Resolve target model ID
     let manifest = match model::get_manifest() {
         Ok(m) => m,

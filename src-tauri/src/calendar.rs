@@ -1,6 +1,16 @@
 use crate::parser::EventDetails;
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarInfo {
+    pub id: String,
+    pub title: String,
+    pub source_title: String,
+    pub color: String,
+    pub is_default: bool,
+    pub allows_modifications: bool,
+}
 /// Parses various date-time string formats into epoch seconds (as f64).
 pub fn parse_date_to_epoch(date_str: &str) -> Option<f64> {
     let trimmed = date_str.trim();
@@ -44,7 +54,7 @@ pub fn parse_date_to_epoch(date_str: &str) -> Option<f64> {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
-    use super::{parse_date_to_epoch, EventDetails};
+    use super::{parse_date_to_epoch, CalendarInfo, EventDetails};
     use chrono::Local;
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_double, c_int};
@@ -60,6 +70,11 @@ mod apple {
             out_error: *mut *mut c_char,
         ) -> c_int;
 
+        fn calendar_apple_list_calendars(
+            out_json: *mut *mut c_char,
+            out_error: *mut *mut c_char,
+        ) -> c_int;
+
         fn calendar_apple_create_event(
             title: *const c_char,
             start_epoch: c_double,
@@ -69,6 +84,9 @@ mod apple {
             notes: *const c_char,
             url: *const c_char,
             recurrence_rule: *const c_char,
+            calendar_id: *const c_char,
+            calendar_title: *const c_char,
+            calendar_source_title: *const c_char,
             out_event_id: *mut *mut c_char,
             out_error: *mut *mut c_char,
         ) -> c_int;
@@ -127,7 +145,33 @@ mod apple {
         Ok(out_granted == 1)
     }
 
-    pub fn create_event(event: &EventDetails) -> Result<String, String> {
+    pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {
+        let mut out_json: *mut c_char = std::ptr::null_mut();
+        let mut out_error: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe { calendar_apple_list_calendars(&mut out_json, &mut out_error) };
+        let _json_guard = AutoCString(out_json);
+        let _error_guard = AutoCString(out_error);
+
+        if code != 0 || out_json.is_null() {
+            let err_msg = if !out_error.is_null() {
+                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
+            } else {
+                "Failed to retrieve available calendars.".to_string()
+            };
+            return Err(err_msg);
+        }
+
+        let json_str = unsafe { CStr::from_ptr(out_json).to_string_lossy() };
+        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse calendar list: {}", e))
+    }
+
+    pub fn create_event(
+        event: &EventDetails,
+        calendar_id: Option<&str>,
+        calendar_title: Option<&str>,
+        calendar_source_title: Option<&str>,
+    ) -> Result<String, String> {
         let trimmed_title = event.title.trim();
         if trimmed_title.is_empty() {
             return Err("Event title cannot be empty.".to_string());
@@ -179,6 +223,21 @@ mod apple {
             None => None,
         };
 
+        let calendar_id_c = match calendar_id.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            None => None,
+        };
+
+        let calendar_title_c = match calendar_title.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            None => None,
+        };
+
+        let calendar_source_title_c = match calendar_source_title.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            None => None,
+        };
+
         let mut out_event_id: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
         let code = unsafe {
@@ -191,6 +250,9 @@ mod apple {
                 notes_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 url_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 recurrence_rule_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                calendar_id_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                calendar_title_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                calendar_source_title_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 &mut out_event_id,
                 &mut out_error,
             )
@@ -215,7 +277,7 @@ mod apple {
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod fallback {
-    use super::EventDetails;
+    use super::{CalendarInfo, EventDetails};
 
     pub fn check_permission() -> Result<String, String> {
         Ok("authorized".to_string())
@@ -225,7 +287,33 @@ mod fallback {
         Ok(true)
     }
 
-    pub fn create_event(event: &EventDetails) -> Result<String, String> {
+    pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {
+        Ok(vec![
+            CalendarInfo {
+                id: "default".to_string(),
+                title: "Personal".to_string(),
+                source_title: "Default Account".to_string(),
+                color: "#3B82F6".to_string(),
+                is_default: true,
+                allows_modifications: true,
+            },
+            CalendarInfo {
+                id: "work".to_string(),
+                title: "Work".to_string(),
+                source_title: "Work Account".to_string(),
+                color: "#10B981".to_string(),
+                is_default: false,
+                allows_modifications: true,
+            },
+        ])
+    }
+
+    pub fn create_event(
+        event: &EventDetails,
+        _calendar_id: Option<&str>,
+        _calendar_title: Option<&str>,
+        _calendar_source_title: Option<&str>,
+    ) -> Result<String, String> {
         if event.title.trim().is_empty() {
             return Err("Event title cannot be empty.".to_string());
         }
@@ -240,15 +328,19 @@ pub use apple::*;
 pub use fallback::*;
 
 /// Batch helper to create multiple calendar events
-pub fn create_events(events: &[EventDetails]) -> Result<Vec<String>, String> {
+pub fn create_events(
+    events: &[EventDetails],
+    calendar_id: Option<&str>,
+    calendar_title: Option<&str>,
+    calendar_source_title: Option<&str>,
+) -> Result<Vec<String>, String> {
     let mut event_ids = Vec::new();
     for event in events {
-        let id = create_event(event)?;
+        let id = create_event(event, calendar_id, calendar_title, calendar_source_title)?;
         event_ids.push(id);
     }
     Ok(event_ids)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,7 +397,7 @@ mod tests {
             source: "test".to_string(),
         };
 
-        let result = create_event(&event);
+        let result = create_event(&event, None, None, None);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Event title cannot be empty.");
     }
@@ -324,7 +416,7 @@ mod tests {
             source: "test".to_string(),
         };
 
-        let result = create_event(&event);
+        let result = create_event(&event, Some("default"), Some("Work"), Some("Exchange"));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Event title cannot be empty.");
     }
@@ -343,7 +435,7 @@ mod tests {
             source: "test".to_string(),
         };
 
-        let result = create_event(&event);
+        let result = create_event(&event, None, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid recurrence rule"));
     }
@@ -354,5 +446,26 @@ mod tests {
         assert!(status.is_ok());
         let s = status.unwrap();
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn test_calendar_info_serde() {
+        let info = CalendarInfo {
+            id: "cal-123".to_string(),
+            title: "Personal".to_string(),
+            source_title: "iCloud".to_string(),
+            color: "#4285F4".to_string(),
+            is_default: true,
+            allows_modifications: true,
+        };
+        let serialized = serde_json::to_string(&info).expect("serialize");
+        let deserialized: CalendarInfo = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(info, deserialized);
+    }
+
+    #[test]
+    fn test_list_calendars_returns_result() {
+        let cals = list_calendars();
+        assert!(cals.is_ok());
     }
 }

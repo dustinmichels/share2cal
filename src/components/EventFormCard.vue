@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import type { CalendarInfo } from "../services/calendar";
+import type { CalendarTarget } from "../services/settings";
 import {
   parseRecurrenceRule,
   buildRecurrenceRule,
@@ -8,17 +10,26 @@ import {
 } from "../services/event";
 
 const model = defineModel<EventFormData>({ required: true });
+const selectedCalendarId = defineModel<string>("selectedCalendarId", { default: "" });
 
-const props = defineProps<{
-  confidence: number;
-  isAddingToCalendar?: boolean;
-  copiedSummary?: boolean;
-  currentIndex?: number;
-  totalEvents?: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    confidence: number;
+    isAddingToCalendar?: boolean;
+    copiedSummary?: boolean;
+    currentIndex?: number;
+    totalEvents?: number;
+    availableCalendars?: CalendarInfo[];
+    defaultTarget?: CalendarTarget;
+  }>(),
+  {
+    defaultTarget: "native",
+  },
+);
 
 const emit = defineEmits<{
   (e: "addToCalendar"): void;
+  (e: "openGoogleCalendar"): void;
   (e: "exportIcs"): void;
   (e: "copySummary"): void;
   (e: "back"): void;
@@ -278,11 +289,79 @@ watch(isRepeating, (newVal) => {
           placeholder="Performers, details, notes..."
         ></textarea>
       </div>
+
+      <!-- Destination Calendar Selection -->
+      <div v-if="availableCalendars && availableCalendars.length > 0" class="field-item">
+        <label class="field-label" for="target-calendar">Save to Calendar</label>
+        <div class="select-wrapper">
+          <select
+            id="target-calendar"
+            v-model="selectedCalendarId"
+            class="field-input field-select"
+          >
+            <option value="">Default Calendar (System)</option>
+            <option
+              v-for="cal in availableCalendars"
+              :key="cal.id"
+              :value="cal.id"
+            >
+              {{ cal.title }} {{ cal.source_title ? `(${cal.source_title})` : "" }}
+            </option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <!-- Event Action Cluster -->
+    <!-- Event Action Cluster -->
     <div class="event-actions-flow">
+      <!-- Primary Action Button (routed by defaultTarget preference) -->
       <button
+        v-if="defaultTarget === 'google'"
+        type="button"
+        class="btn-touch btn-touch-calendar"
+        @click="emit('openGoogleCalendar')"
+      >
+        <svg
+          class="btn-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+        <span>Add to Google Calendar</span>
+      </button>
+
+      <button
+        v-else-if="defaultTarget === 'ics'"
+        type="button"
+        class="btn-touch btn-touch-calendar"
+        @click="emit('exportIcs')"
+      >
+        <svg
+          class="btn-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>Export .ics File</span>
+      </button>
+
+      <button
+        v-else
         type="button"
         class="btn-touch btn-touch-calendar"
         :disabled="isAddingToCalendar"
@@ -314,6 +393,74 @@ watch(isRepeating, (newVal) => {
 
       <div class="secondary-button-row">
         <button
+          v-if="defaultTarget !== 'native'"
+          type="button"
+          class="btn-touch btn-touch-outline"
+          :disabled="isAddingToCalendar"
+          @click="emit('addToCalendar')"
+        >
+          <svg
+            class="btn-icon-sm"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+          </svg>
+          <span>Add to Calendar</span>
+        </button>
+
+        <button
+          v-if="defaultTarget !== 'google'"
+          type="button"
+          class="btn-touch btn-touch-outline btn-google-cal"
+          title="Add to Google Calendar in browser"
+          @click="emit('openGoogleCalendar')"
+        >
+          <svg
+            class="btn-icon-sm"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          <span>Google Cal</span>
+        </button>
+
+        <button
+          v-if="defaultTarget !== 'ics'"
+          type="button"
+          class="btn-touch btn-touch-outline"
+          @click="emit('exportIcs')"
+        >
+          <svg
+            class="btn-icon-sm"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Export .ics</span>
+        </button>
+
+        <button
           type="button"
           class="btn-touch btn-touch-outline btn-done-editing"
           @click="emit('back')"
@@ -329,24 +476,7 @@ watch(isRepeating, (newVal) => {
           >
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
-          <span>Done Editing</span>
-        </button>
-
-        <button type="button" class="btn-touch btn-touch-outline" @click="emit('exportIcs')">
-          <svg
-            class="btn-icon-sm"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <span>Export .ics</span>
+          <span>Done</span>
         </button>
 
         <button
@@ -386,7 +516,6 @@ watch(isRepeating, (newVal) => {
           </template>
         </button>
       </div>
-
       <div v-if="totalEvents && totalEvents > 1" class="delete-action-row">
         <button type="button" class="btn-delete-event" @click="emit('remove')">
           <svg

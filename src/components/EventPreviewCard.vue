@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import type { CalendarInfo } from "../services/calendar";
+import type { CalendarTarget } from "../services/settings";
 import {
   extractDateInput,
   formatDateForDisplay,
@@ -8,21 +10,29 @@ import {
   type EventDetails,
 } from "../services/event";
 
-const props = defineProps<{
-  events: EventDetails[];
-  isAddingToCalendar?: boolean;
-  copiedSummary?: boolean;
-  addedIndices?: Set<number>;
-}>();
+const selectedCalendarId = defineModel<string>("selectedCalendarId", { default: "" });
 
+const props = withDefaults(
+  defineProps<{
+    events: EventDetails[];
+    isAddingToCalendar?: boolean;
+    copiedSummary?: boolean;
+    addedIndices?: Set<number>;
+    availableCalendars?: CalendarInfo[];
+    defaultTarget?: CalendarTarget;
+  }>(),
+  {
+    defaultTarget: "native",
+  },
+);
 const emit = defineEmits<{
   (e: "editEvent", index: number): void;
   (e: "addToCalendar"): void;
+  (e: "openGoogleCalendar", index?: number): void;
   (e: "exportIcs"): void;
   (e: "copySummary"): void;
   (e: "removeEvent", index: number): void;
 }>();
-
 interface WeekPreviewEvent {
   event: EventDetails;
   index: number;
@@ -448,7 +458,80 @@ function formatEventTiming(event: EventDetails): string {
 
     <!-- Batch / Primary Actions -->
     <div class="preview-actions-flow">
+      <!-- Destination Calendar Selection -->
+      <div v-if="availableCalendars && availableCalendars.length > 0" class="calendar-destination-row">
+        <label for="preview-target-cal" class="destination-label">
+          <svg class="dest-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+          <span>Save to:</span>
+        </label>
+        <select
+          id="preview-target-cal"
+          v-model="selectedCalendarId"
+          class="destination-select"
+        >
+          <option value="">Default Calendar (System)</option>
+          <option
+            v-for="cal in availableCalendars"
+            :key="cal.id"
+            :value="cal.id"
+          >
+            {{ cal.title }} {{ cal.source_title ? `· ${cal.source_title}` : "" }}
+          </option>
+        </select>
+      </div>
+
+      <!-- Primary Action (based on defaultTarget preference) -->
       <button
+        v-if="defaultTarget === 'google'"
+        type="button"
+        class="btn-touch btn-touch-calendar"
+        @click="emit('openGoogleCalendar')"
+      >
+        <svg
+          class="btn-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+        <span>{{ isMultiple ? `Open First Event in Google Cal` : "Add to Google Calendar" }}</span>
+      </button>
+
+      <button
+        v-else-if="defaultTarget === 'ics'"
+        type="button"
+        class="btn-touch btn-touch-calendar"
+        @click="emit('exportIcs')"
+      >
+        <svg
+          class="btn-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>{{ isMultiple ? `Export All (${eventCount}) to .ics` : "Export .ics File" }}</span>
+      </button>
+
+      <button
+        v-else
         type="button"
         class="btn-touch btn-touch-calendar"
         :disabled="isAddingToCalendar"
@@ -477,7 +560,58 @@ function formatEventTiming(event: EventDetails): string {
       </button>
 
       <div class="secondary-actions-grid">
-        <button type="button" class="btn-touch btn-touch-outline" @click="emit('exportIcs')">
+        <button
+          v-if="defaultTarget !== 'native'"
+          type="button"
+          class="btn-touch btn-touch-outline"
+          :disabled="isAddingToCalendar"
+          @click="emit('addToCalendar')"
+        >
+          <svg
+            class="btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+          </svg>
+          <span>{{ isMultiple ? "Add to Native" : "Apple Cal" }}</span>
+        </button>
+
+        <button
+          v-if="defaultTarget !== 'google'"
+          type="button"
+          class="btn-touch btn-touch-outline"
+          title="Open in Google Calendar"
+          @click="emit('openGoogleCalendar')"
+        >
+          <svg
+            class="btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          <span>Google Cal</span>
+        </button>
+
+        <button
+          v-if="defaultTarget !== 'ics'"
+          type="button"
+          class="btn-touch btn-touch-outline"
+          @click="emit('exportIcs')"
+        >
           <svg
             class="btn-icon"
             viewBox="0 0 24 24"
@@ -491,9 +625,8 @@ function formatEventTiming(event: EventDetails): string {
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span>{{ isMultiple ? "Export All (.ics)" : "Export (.ics)" }}</span>
+          <span>{{ isMultiple ? "Export All" : "Export .ics" }}</span>
         </button>
-
         <button
           type="button"
           class="btn-touch btn-touch-outline"
@@ -994,6 +1127,49 @@ function formatEventTiming(event: EventDetails): string {
   height: 14px;
 }
 
+.calendar-destination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border-card-subtle);
+  border-radius: 10px;
+  margin-bottom: 0.25rem;
+}
+
+.destination-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.dest-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--accent-primary);
+}
+
+.destination-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+
 .preview-actions-flow {
   display: flex;
   flex-direction: column;
@@ -1003,10 +1179,9 @@ function formatEventTiming(event: EventDetails): string {
 
 .secondary-actions-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.5rem;
 }
-
 .btn-icon {
   width: 18px;
   height: 18px;

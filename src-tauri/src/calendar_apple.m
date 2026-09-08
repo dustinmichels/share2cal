@@ -20,8 +20,6 @@ int calendar_apple_check_permission(char **out_status, char **out_error) {
         EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
         NSString *statusStr = @"unknown";
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         switch (status) {
             case EKAuthorizationStatusNotDetermined:
                 statusStr = @"not_determined";
@@ -32,19 +30,25 @@ int calendar_apple_check_permission(char **out_status, char **out_error) {
             case EKAuthorizationStatusDenied:
                 statusStr = @"denied";
                 break;
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000 || __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
+            case EKAuthorizationStatusFullAccess:
+                statusStr = @"authorized";
+                break;
+            case EKAuthorizationStatusWriteOnly:
+                statusStr = @"write_only";
+                break;
+#else
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             case EKAuthorizationStatusAuthorized:
                 statusStr = @"authorized";
                 break;
+#pragma clang diagnostic pop
+#endif
             default:
-                // EKAuthorizationStatusWriteOnly (value 4) introduced in iOS 17.0 / macOS 14.0
-                if ((NSInteger)status == 4) {
-                    statusStr = @"write_only";
-                } else {
-                    statusStr = @"unknown";
-                }
+                statusStr = @"unknown";
                 break;
         }
-#pragma clang diagnostic pop
         if (out_status) {
             *out_status = create_c_string(statusStr);
         }
@@ -60,8 +64,8 @@ int calendar_apple_request_permission(int *out_granted, char **out_error) {
         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
         if (@available(iOS 17.0, macOS 14.0, *)) {
-            // iOS 17+ supports requesting write-only access for creating events
-            [store requestWriteOnlyAccessToEventsWithCompletion:^(BOOL granted, NSError * _Nullable error) {
+            // Request full access to events to allow enumerating and selecting calendars
+            [store requestFullAccessToEventsWithCompletion:^(BOOL granted, NSError * _Nullable error) {
                 grantedResult = granted;
                 errorResult = error;
                 dispatch_semaphore_signal(sem);
@@ -95,6 +99,86 @@ int calendar_apple_request_permission(int *out_granted, char **out_error) {
 
         if (out_granted) {
             *out_granted = grantedResult ? 1 : 0;
+        }
+        return 0;
+    }
+}
+
+int calendar_apple_list_calendars(char **out_json, char **out_error) {
+    @autoreleasepool {
+        EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
+        // If not fully authorized, do NOT prompt automatically on listing; return empty array cleanly
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000 || __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
+        if (status != EKAuthorizationStatusFullAccess) {
+#else
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        if (status != EKAuthorizationStatusAuthorized) {
+#pragma clang diagnostic pop
+#endif
+            if (out_json) {
+                *out_json = create_c_string(@"[]");
+            }
+            return 0;
+        }
+
+        EKEventStore *store = [[EKEventStore alloc] init];
+        EKCalendar *defaultCal = [store defaultCalendarForNewEvents];
+        NSArray<EKCalendar *> *calendars = [store calendarsForEntityType:EKEntityTypeEvent];
+
+        NSMutableArray<NSDictionary *> *calendarList = [NSMutableArray array];
+        for (EKCalendar *cal in calendars) {
+            // Filter strictly to modifiable calendars
+            if (!cal.allowsContentModifications) {
+                continue;
+            }
+
+            BOOL isDefault = defaultCal && [cal.calendarIdentifier isEqualToString:defaultCal.calendarIdentifier];
+
+            NSString *colorHex = @"#3B82F6";
+            if (cal.CGColor) {
+                CGColorRef cgColor = cal.CGColor;
+                size_t numComponents = CGColorGetNumberOfComponents(cgColor);
+                const CGFloat *components = CGColorGetComponents(cgColor);
+                if (components && numComponents >= 3) {
+                    CGFloat r = components[0];
+                    CGFloat g = components[1];
+                    CGFloat b = components[2];
+                    colorHex = [NSString stringWithFormat:@"#%02X%02X%02X",
+                        (int)lroundf((float)r * 255.0f),
+                        (int)lroundf((float)g * 255.0f),
+                        (int)lroundf((float)b * 255.0f)];
+                }
+            }
+
+            NSString *sourceTitle = @"";
+            if (cal.source && cal.source.title) {
+                sourceTitle = cal.source.title;
+            }
+
+            NSDictionary *calDict = @{
+                @"id": cal.calendarIdentifier ?: @"",
+                @"title": cal.title ?: @"Untitled Calendar",
+                @"source_title": sourceTitle,
+                @"color": colorHex,
+                @"is_default": @(isDefault),
+                @"allows_modifications": @(YES)
+            };
+            [calendarList addObject:calDict];
+        }
+
+        NSError *jsonErr = nil;
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:calendarList options:0 error:&jsonErr];
+        if (jsonErr || !jsonData) {
+            if (out_error) {
+                *out_error = create_c_string(jsonErr ? jsonErr.localizedDescription : @"Failed to serialize calendars to JSON.");
+            }
+            return -1;
+        }
+
+        NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+        if (out_json) {
+            *out_json = create_c_string(jsonStr ?: @"[]");
         }
         return 0;
     }
@@ -245,6 +329,9 @@ int calendar_apple_create_event(
     const char *notes,
     const char *url,
     const char *recurrence_rule,
+    const char *calendar_id,
+    const char *calendar_title,
+    const char *calendar_source_title,
     char **out_event_id,
     char **out_error
 ) {
@@ -279,19 +366,60 @@ int calendar_apple_create_event(
             store = [[EKEventStore alloc] init];
         } else if (status == EKAuthorizationStatusDenied || status == EKAuthorizationStatusRestricted) {
             if (out_error) {
-                *out_error = create_c_string(@"Calendar access denied. Please enable Calendar permissions in iOS Settings.");
+                *out_error = create_c_string(@"Calendar access denied. Please enable Calendar permissions in Settings.");
             }
             return -1;
         }
 
-        // Retrieve default calendar or find first writable calendar
-        EKCalendar *targetCalendar = [store defaultCalendarForNewEvents];
-        if (!targetCalendar || !targetCalendar.allowsContentModifications) {
+        // Retrieve target calendar
+        EKCalendar *targetCalendar = nil;
+        if (calendar_id && strlen(calendar_id) > 0) {
+            NSString *calIdStr = [NSString stringWithUTF8String:calendar_id];
+            targetCalendar = [store calendarWithIdentifier:calIdStr];
+            if (!targetCalendar || !targetCalendar.allowsContentModifications) {
+                targetCalendar = nil;
+            }
+        }
+
+        // If not resolved by ID, match by title + source_title among writable calendars
+        if (!targetCalendar && calendar_title && strlen(calendar_title) > 0) {
+            NSString *titleStr = [NSString stringWithUTF8String:calendar_title];
+            NSString *sourceStr = (calendar_source_title && strlen(calendar_source_title) > 0)
+                ? [NSString stringWithUTF8String:calendar_source_title]
+                : nil;
             NSArray<EKCalendar *> *calendars = [store calendarsForEntityType:EKEntityTypeEvent];
-            for (EKCalendar *cal in calendars) {
-                if (cal.allowsContentModifications) {
-                    targetCalendar = cal;
-                    break;
+
+            if (sourceStr && sourceStr.length > 0) {
+                for (EKCalendar *cal in calendars) {
+                    if (cal.allowsContentModifications &&
+                        [cal.title isEqualToString:titleStr] &&
+                        cal.source && [cal.source.title isEqualToString:sourceStr]) {
+                        targetCalendar = cal;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetCalendar) {
+                for (EKCalendar *cal in calendars) {
+                    if (cal.allowsContentModifications && [cal.title isEqualToString:titleStr]) {
+                        targetCalendar = cal;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If not specified or not found/writable, fall back to default calendar or first writable calendar
+        if (!targetCalendar || !targetCalendar.allowsContentModifications) {
+            targetCalendar = [store defaultCalendarForNewEvents];
+            if (!targetCalendar || !targetCalendar.allowsContentModifications) {
+                NSArray<EKCalendar *> *calendars = [store calendarsForEntityType:EKEntityTypeEvent];
+                for (EKCalendar *cal in calendars) {
+                    if (cal.allowsContentModifications) {
+                        targetCalendar = cal;
+                        break;
+                    }
                 }
             }
         }
@@ -302,7 +430,6 @@ int calendar_apple_create_event(
             }
             return -1;
         }
-
         EKEvent *event = [EKEvent eventWithEventStore:store];
         event.title = [NSString stringWithUTF8String:title];
         event.calendar = targetCalendar;

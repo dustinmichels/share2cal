@@ -385,9 +385,13 @@ pub fn parse_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -
 fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
     let ref_dt = context.get_reference_datetime();
     let offset = context.get_fixed_offset();
-    let course_code_re = Regex::new(r"\b([A-Z]{2,6}\s+\d{3,4}(?:-\d{2,3})?(?:\s*\(\d+\))?)\b").unwrap();
+    let course_code_re = Regex::new(r"\b([A-Z]{2,6}\s+\d{3,4}(?:-\d{2,3})?(?:\s*\(\d+\))?)").unwrap();
     let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
     let time_range_re = Regex::new(r"(?i)\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b").unwrap();
+    let faculty_re = Regex::new(r"(?i)\b([A-Z]\.\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b").unwrap();
+    let units_re = Regex::new(r"\b(\d+\.\d{2})\b").unwrap();
+    let section_num_re = Regex::new(r"\((\d{4,6})\)").unwrap();
+    let course_type_re = Regex::new(r"(?i)\((Lecture|Seminar|Lab|Discussion|Recitation|Studio|Practicum|Workshop|Lecture/Lab)\)").unwrap();
 
     let blacklist_prefixes = ["ROOM", "HALL", "DATE", "PAGE", "TERM", "YEAR", "BLDG", "STEP", "UNIT", "SUMMIT"];
     let matches: Vec<_> = course_code_re
@@ -400,7 +404,7 @@ fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -
     let mut events = Vec::new();
 
     for (i, m) in matches.iter().enumerate() {
-        let course_code = m.as_str().trim();
+        let mut course_code = m.as_str().trim().to_string();
         let start_pos = m.end();
         let end_pos = if i + 1 < matches.len() {
             matches[i + 1].start()
@@ -409,10 +413,29 @@ fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -
         };
 
         let block_raw = &ocr_text[start_pos..end_pos];
-        let block_clean = block_raw.replace('\n', " ");
 
-        let time_match = time_range_re.find(&block_clean);
-        let days_match = day_pattern_re.find(&block_clean);
+        // If course code doesn't contain (section_number), look for one in block_raw
+        if !course_code.contains('(') {
+            if let Some(sm) = section_num_re.find(block_raw) {
+                course_code = format!("{} {}", course_code, sm.as_str().trim());
+            }
+        }
+
+        let block_lines: Vec<&str> = block_raw.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        if block_lines.is_empty() {
+            continue;
+        }
+
+        // Find which line has the time range
+        let time_line_idx_opt = block_lines.iter().position(|l| time_range_re.is_match(l));
+        if time_line_idx_opt.is_none() {
+            continue;
+        }
+        let time_line_idx = time_line_idx_opt.unwrap();
+        let time_line = block_lines[time_line_idx];
+
+        let time_match = time_range_re.find(time_line);
+        let days_match = day_pattern_re.find(time_line).or_else(|| day_pattern_re.find(block_raw));
 
         if let Some(tm) = time_match {
             let time_str = tm.as_str();
@@ -453,32 +476,115 @@ fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -
                 (None, None, true)
             };
 
-            let pre_time_text = if let Some(dm) = days_match {
-                if dm.start() < block_clean.len() {
-                    &block_clean[..dm.start()]
+            let mut desc_parts_accum: Vec<String> = Vec::new();
+            for prev_l in &block_lines[..time_line_idx] {
+                let cleaned = clean_course_name(prev_l);
+                if !cleaned.is_empty() {
+                    desc_parts_accum.push(cleaned);
+                }
+            }
+
+            let pre_time_text = if let Some(dm) = day_pattern_re.find(time_line) {
+                if dm.start() < time_line.len() {
+                    &time_line[..dm.start()]
                 } else {
-                    &block_clean[..tm.start()]
+                    &time_line[..tm.start()]
                 }
             } else {
-                &block_clean[..tm.start()]
+                &time_line[..tm.start()]
             };
+            let cleaned_pre_time = clean_course_name(pre_time_text);
+            if !cleaned_pre_time.is_empty() {
+                desc_parts_accum.push(cleaned_pre_time);
+            }
 
-            let course_name = clean_course_name(pre_time_text);
-            let full_title = if !course_name.is_empty() {
-                format!("{} {}", course_code, course_name)
+            // Extract faculty and units across the whole block
+            let faculty_match = faculty_re.find(block_raw).map(|f| f.as_str().trim().to_string());
+            let units_match = units_re.find(block_raw).map(|u| u.as_str().trim().to_string());
+
+            // Post-time text on time_line
+            let post_time_on_line = &time_line[tm.end()..];
+            let mut post_time_cleaned = post_time_on_line.trim().to_string();
+            if let Some(f) = &faculty_match {
+                post_time_cleaned = post_time_cleaned.replace(f, "");
+            }
+            if let Some(u) = &units_match {
+                post_time_cleaned = post_time_cleaned.replace(u, "");
+            }
+            post_time_cleaned = post_time_cleaned.trim_matches(|c: char| c == ',' || c == '|' || c == '-' || c.is_whitespace()).trim().to_string();
+
+            let mut location: Option<String> = if !post_time_cleaned.is_empty() {
+                Some(post_time_cleaned)
             } else {
-                course_code.to_string()
+                None
             };
 
-            let post_time_text = &block_clean[tm.end()..];
-            let (location, faculty_notes) = extract_schedule_post_time_details(post_time_text);
+            // Inspect other lines after time_line_idx
+            for &post_line in &block_lines[time_line_idx + 1..] {
+                let mut line_str = post_line.trim().to_string();
+                if let Some(f) = &faculty_match {
+                    line_str = line_str.replace(f, "");
+                }
+                if let Some(u) = &units_match {
+                    line_str = line_str.replace(u, "");
+                }
+                // Strip section number like (82454) if present
+                line_str = section_num_re.replace_all(&line_str, "").trim().to_string();
+                line_str = line_str.trim_matches(|c: char| c == ',' || c == '|' || c == '-' || c.is_whitespace()).trim().to_string();
+
+                if line_str.is_empty() {
+                    continue;
+                }
+
+                // Check if this line contains course type / description continuation
+                if let Some(ct) = course_type_re.find(&line_str) {
+                    let desc_cont = line_str[..ct.end()].trim().to_string();
+                    let loc_remainder = line_str[ct.end()..].trim_matches(|c: char| c == ',' || c == '|' || c == '-' || c.is_whitespace()).trim().to_string();
+                    if !desc_cont.is_empty() {
+                        desc_parts_accum.push(desc_cont);
+                    }
+                    if !loc_remainder.is_empty() {
+                        location = Some(loc_remainder);
+                    }
+                } else if line_str.eq_ignore_ascii_case("online") || line_str.to_lowercase().contains("online") {
+                    if line_str.eq_ignore_ascii_case("online") {
+                        location = Some("Online".to_string());
+                    } else {
+                        let lower = line_str.to_lowercase();
+                        if let Some(pos) = lower.find("online") {
+                            let desc_cont = line_str[..pos].trim().trim_matches(|c: char| c == ',' || c == '|' || c == '-').trim().to_string();
+                            if !desc_cont.is_empty() {
+                                desc_parts_accum.push(desc_cont);
+                            }
+                            location = Some("Online".to_string());
+                        } else {
+                            location = Some(line_str);
+                        }
+                    }
+                } else if location.is_none() {
+                    location = Some(line_str);
+                } else {
+                    desc_parts_accum.push(line_str);
+                }
+            }
+
+            let full_course_desc = desc_parts_accum.join(" ");
+            let cleaned_desc = clean_course_name(&full_course_desc);
+            let full_title = if !cleaned_desc.is_empty() {
+                format!("{} {}", course_code, cleaned_desc)
+            } else {
+                course_code.clone()
+            };
 
             let mut desc_parts = Vec::new();
             if let Some(days) = all_days_str {
                 desc_parts.push(format!("Days: {}", days));
             }
-            if let Some(notes) = faculty_notes {
-                desc_parts.push(notes);
+            if let Some(fac) = faculty_match {
+                desc_parts.push(format!("Faculty: {}", fac));
+            }
+            if let Some(un) = units_match {
+                desc_parts.push(format!("Units: {}", un));
             }
             let description = if desc_parts.is_empty() {
                 None
@@ -680,56 +786,16 @@ fn clean_course_name(raw: &str) -> String {
             s = s[hp.len()..].trim().to_string();
         }
     }
-    s = s.trim_matches(|c: char| c == '-' || c == ':' || c == '|' || c == '(' || c == ')' || c == ',' || c == '\n').trim().to_string();
-    s = s.replace("  ", " ");
+    // Trim leading punctuation (including stray closing paren from preceding section number or stray dots)
+    s = s.trim_start_matches(|c: char| c == '-' || c == ':' || c == '|' || c == ')' || c == '.' || c == ',' || c == '\n' || c.is_whitespace()).to_string();
+    // Trim trailing punctuation (colons, dashes, commas, dots, pipes - but preserve trailing ')' if balanced)
+    s = s.trim_end_matches(|c: char| c == '-' || c == ':' || c == '|' || c == ',' || c == '.' || c == '\n' || c.is_whitespace()).to_string();
+    while s.contains("  ") {
+        s = s.replace("  ", " ");
+    }
     s
 }
 
-/// Helper to separate location from instructor and units
-fn extract_schedule_post_time_details(post_text: &str) -> (Option<String>, Option<String>) {
-    let text = post_text.trim();
-    if text.is_empty() {
-        return (None, None);
-    }
-
-    let faculty_re = Regex::new(r"(?i)\b([A-Z]\.\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b").unwrap();
-    let units_re = Regex::new(r"\b(\d+\.\d{2})\b").unwrap();
-
-    let faculty_match = faculty_re.find(text);
-    let units_match = units_re.find(text);
-
-    let location = if let Some(fm) = faculty_match {
-        let loc_str = text[..fm.start()].trim().trim_matches(|c: char| c == ',' || c == '|' || c == '-').trim();
-        if !loc_str.is_empty() {
-            Some(loc_str.to_string())
-        } else {
-            None
-        }
-    } else {
-        let loc_str = text.trim().trim_matches(|c: char| c == ',' || c == '|' || c == '-').trim();
-        if !loc_str.is_empty() {
-            Some(loc_str.to_string())
-        } else {
-            None
-        }
-    };
-
-    let mut notes_parts = Vec::new();
-    if let Some(fm) = faculty_match {
-        notes_parts.push(format!("Faculty: {}", fm.as_str().trim()));
-    }
-    if let Some(um) = units_match {
-        notes_parts.push(format!("Units: {}", um.as_str().trim()));
-    }
-
-    let notes = if notes_parts.is_empty() {
-        None
-    } else {
-        Some(notes_parts.join(", "))
-    };
-
-    (location, notes)
-}
 
 /// Calculates target weekday date for recurring schedule items
 fn get_weekday_date(day_abbr: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> {

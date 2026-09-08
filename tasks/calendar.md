@@ -117,12 +117,12 @@ Share2Cal already generates RFC 5545 `.ics` content via `generateIcsCalendarCont
 
 ## 3. Implementation Tasks
 
-- [ ] **Permissions & Upgrade Migration**:
+- [x] **Permissions & Upgrade Migration**:
   - Switch `calendar_apple.m` permission requests to `requestFullAccessToEventsWithCompletion:`.
   - Add `NSCalendarsFullAccessUsageDescription` in `Info.plist` and `project.yml`.
   - Handle existing `write_only` installs: treat `write_only` as insufficient for listing, request full access upgrade, and gracefully fall back to default calendar if declined.
-- [ ] **Backend Calendar Listing**: Implement `calendar_apple_list_calendars` and expose `get_available_calendars` Tauri command.
-- [ ] **Backend Event Creation by ID**: Update `create_calendar_event` to accept an optional `calendar_id` and implement safe fallback resolution (ID → Title + Source → System Default).
-- [ ] **Google Calendar URL Generator**: Add `generateGoogleCalendarUrl` in `src/services/calendar.ts`.
-- [ ] **Settings & Persistence**: Add calendar selection preferences to `src/services/settings.ts` and `src/components/SettingsView.vue`.
-- [ ] **UI Integration**: Add destination calendar selector / action options in `src/components/EventFormCard.vue`.
+- [x] **Backend Calendar Listing**: Implement `calendar_apple_list_calendars` and expose `get_available_calendars` Tauri command.
+- [x] **Backend Event Creation by ID**: Update `create_calendar_event` to accept an optional `calendar_id` and implement safe fallback resolution (ID → Title + Source → System Default).
+- [x] **Google Calendar URL Generator**: Add `generateGoogleCalendarUrl` in `src/services/calendar.ts`.
+- [x] **Settings & Persistence**: Add calendar selection preferences to `src/services/settings.ts` and `src/components/SettingsView.vue`.
+- [x] **UI Integration**: Add destination calendar selector / action options in `src/components/EventFormCard.vue`.

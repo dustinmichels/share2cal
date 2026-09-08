@@ -83,6 +83,18 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     },
   ];
 
+  const gilmanFlyerEvent: EventDetails = {
+    title: "SomerStreets: Gilman Square Arts & Music Festival",
+    start_time: "2026-09-12T12:00:00-04:00",
+    end_time: "2026-09-12T17:00:00-04:00",
+    is_all_day: false,
+    location: "Ed Leathers Park (Walnut St & Skilton Ave), Somerville, MA",
+    description:
+      "Rain date: Sunday, September 13, 2026. Live music & performances, beer garden, food vendors, artists & makers, and kids activities.",
+    confidence: 0.95,
+    source: "deterministic_flyer",
+  };
+
   it("generates a multi-event RFC 5545 iCalendar (.ics) string with 6 distinct VEVENT blocks", () => {
     const icsContent = generateMultiIcsCalendarContent(sampleEvents);
 
@@ -126,6 +138,51 @@ describe("Event Service & Multi-Event ICS Generation", () => {
     expect(ics).toStartWith("BEGIN:VCALENDAR");
     expect(ics).toEndWith("END:VCALENDAR");
     expect(ics).toContain("SUMMARY:CEE 0154-03 Principles Epidemiology (Lecture)");
+  });
+
+  it("generates single event ICS correctly for Gilman Square Arts & Music Festival flyer sample", () => {
+    const ics = generateIcsCalendarContent(gilmanFlyerEvent);
+    expect(ics).toStartWith("BEGIN:VCALENDAR");
+    expect(ics).toEndWith("END:VCALENDAR");
+    expect(ics).toContain("BEGIN:VEVENT");
+    expect(ics).toContain("END:VEVENT");
+    expect(ics).toContain("SUMMARY:SomerStreets: Gilman Square Arts & Music Festival");
+    expect(ics).toContain(
+      "LOCATION:Ed Leathers Park (Walnut St & Skilton Ave)\\, Somerville\\, MA",
+    );
+    expect(ics).toContain(
+      "DESCRIPTION:Rain date: Sunday\\, September 13\\, 2026. Live music & performances\\, beer garden\\, food vendors\\, artists & makers\\, and kids activities.",
+    );
+    expect(ics).toContain("STATUS:CONFIRMED");
+    expect(ics).toContain("DTSTART:20260912T160000Z");
+    expect(ics).toContain("DTEND:20260912T210000Z");
+  });
+
+  it("extracts and formats date and time values accurately for Gilman Square flyer event", () => {
+    const dateInput = extractDateInput(gilmanFlyerEvent.start_time);
+    expect(dateInput).toBe("2026-09-12");
+
+    const startTimeInput = extractTimeInput(gilmanFlyerEvent.start_time);
+    expect(startTimeInput).toBe("12:00");
+
+    const endTimeInput = extractTimeInput(gilmanFlyerEvent.end_time);
+    expect(endTimeInput).toBe("17:00");
+
+    const formattedDate = formatDateForDisplay(gilmanFlyerEvent.start_time);
+    expect(formattedDate).toContain("2026");
+    expect(formattedDate).toContain("Sep");
+
+    const formattedStartTime = formatTimeForDisplay(gilmanFlyerEvent.start_time);
+    expect(formattedStartTime).not.toBe("");
+
+    const formattedEndTime = formatTimeForDisplay(gilmanFlyerEvent.end_time);
+    expect(formattedEndTime).not.toBe("");
+
+    const reconstructedStart = buildIsoFromDateTime("2026-09-12", "12:00");
+    expect(reconstructedStart).toContain("2026-09-12T12:00");
+
+    const reconstructedEnd = buildIsoFromDateTime("2026-09-12", "17:00");
+    expect(reconstructedEnd).toContain("2026-09-12T17:00");
   });
 
   it("formats dates and times for display accurately", () => {

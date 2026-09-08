@@ -1,6 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import type { ParsingMode } from "../services/settings";
+import {
+  getAvailableCalendars,
+  checkCalendarPermission,
+  requestCalendarPermission,
+  type CalendarInfo,
+  type CalendarPermissionStatus,
+} from "../services/calendar";
+import {
+  getStoredDefaultCalendarId,
+  setStoredDefaultCalendarId,
+  setStoredCalendarPreference,
+  getStoredDefaultTarget,
+  setStoredDefaultTarget,
+  type CalendarTarget,
+  type ParsingMode,
+} from "../services/settings";
 import {
   getModelStatuses,
   getModelsStorageInfo,
@@ -15,7 +30,6 @@ import {
   type ModelsStorageInfo,
   type DownloadProgressPayload,
 } from "../services/model";
-
 const props = defineProps<{
   parsingMode: ParsingMode;
 }>();
@@ -46,14 +60,88 @@ const activeDownloads = ref<
   >
 >({});
 const copiedPath = ref(false);
+const availableCalendars = ref<CalendarInfo[]>([]);
+const selectedDefaultCalendarId = ref<string>(getStoredDefaultCalendarId() || "");
+const defaultCalendarTarget = ref<CalendarTarget>(getStoredDefaultTarget());
+const calendarPermissionStatus = ref<CalendarPermissionStatus>("unknown");
+const isRequestingCalendarPermission = ref(false);
 
 let unlistenProgress: (() => void) | null = null;
+
+async function loadCalendarData() {
+  try {
+    const [status, cals] = await Promise.all([
+      checkCalendarPermission(),
+      getAvailableCalendars(),
+    ]);
+    calendarPermissionStatus.value = status;
+    availableCalendars.value = cals;
+  } catch (err) {
+    console.warn("Failed to load calendar data:", err);
+  }
+}
+
+function handleCalendarSelectionChange(calendarId: string) {
+  selectedDefaultCalendarId.value = calendarId;
+  if (!calendarId) {
+    setStoredCalendarPreference(null);
+    actionSuccess.value = "Default calendar set to System Default.";
+  } else {
+    const found = availableCalendars.value.find((c) => c.id === calendarId);
+    if (found) {
+      setStoredCalendarPreference({
+        id: found.id,
+        title: found.title,
+        sourceTitle: found.source_title,
+      });
+      actionSuccess.value = `Default calendar set to "${found.title}".`;
+    } else {
+      setStoredDefaultCalendarId(calendarId);
+    }
+  }
+  setTimeout(() => {
+    actionSuccess.value = null;
+  }, 3000);
+}
+
+function handleTargetChange(target: CalendarTarget) {
+  defaultCalendarTarget.value = target;
+  setStoredDefaultTarget(target);
+  actionSuccess.value = `Default destination set to ${
+    target === "native" ? "Apple / Device Calendar" : target === "google" ? "Google Calendar" : ".ics Export"
+  }.`;
+  setTimeout(() => {
+    actionSuccess.value = null;
+  }, 3000);
+}
+
+async function handleGrantPermission() {
+  isRequestingCalendarPermission.value = true;
+  actionError.value = null;
+  try {
+    const granted = await requestCalendarPermission();
+    if (granted) {
+      actionSuccess.value = "Calendar permission granted!";
+      await loadCalendarData();
+    } else {
+      actionError.value = "Calendar access was not granted. Please check device Settings.";
+    }
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    isRequestingCalendarPermission.value = false;
+  }
+}
 
 async function loadData() {
   isLoading.value = true;
   actionError.value = null;
   try {
-    const [statuses, info] = await Promise.all([getModelStatuses(), getModelsStorageInfo()]);
+    const [statuses, info] = await Promise.all([
+      getModelStatuses(),
+      getModelsStorageInfo(),
+      loadCalendarData(),
+    ]);
     models.value = statuses;
     storageInfo.value = info;
   } catch (err) {
@@ -74,7 +162,6 @@ onMounted(async () => {
     console.warn("Could not register model download progress listener:", err);
   }
 });
-
 onUnmounted(() => {
   if (unlistenProgress) {
     unlistenProgress();
@@ -265,6 +352,133 @@ function setMode(mode: ParsingMode) {
         ✕
       </button>
     </div>
+
+    <!-- CALENDAR & DESTINATIONS SETTING CARD -->
+    <section class="surface-card setting-section-card">
+      <div class="section-top">
+        <div class="section-title-wrap">
+          <div class="section-icon-bubble bubble-calendar">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+          </div>
+          <div>
+            <h2 class="section-heading">Calendar Destinations</h2>
+            <p class="section-subheading">Choose where scanned events get saved</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Segmented Toggle: Default Destination Target -->
+      <div class="setting-subsection">
+        <label class="subsection-label">Default Export Action</label>
+        <div class="toggle-track target-toggle-track" role="tablist" aria-label="Default calendar destination">
+          <button
+            type="button"
+            class="toggle-btn"
+            :class="{ 'is-active': defaultCalendarTarget === 'native' }"
+            role="tab"
+            :aria-selected="defaultCalendarTarget === 'native'"
+            @click="handleTargetChange('native')"
+          >
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="12" y1="11" x2="12" y2="17"></line>
+              <line x1="9" y1="14" x2="15" y2="14"></line>
+            </svg>
+            <span class="toggle-label">Apple Cal</span>
+          </button>
+
+          <button
+            type="button"
+            class="toggle-btn"
+            :class="{ 'is-active': defaultCalendarTarget === 'google' }"
+            role="tab"
+            :aria-selected="defaultCalendarTarget === 'google'"
+            @click="handleTargetChange('google')"
+          >
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+            <span class="toggle-label">Google Cal</span>
+          </button>
+
+          <button
+            type="button"
+            class="toggle-btn"
+            :class="{ 'is-active': defaultCalendarTarget === 'ics' }"
+            role="tab"
+            :aria-selected="defaultCalendarTarget === 'ics'"
+            @click="handleTargetChange('ics')"
+          >
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span class="toggle-label">.ics File</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Target Apple/Device Calendar Dropdown -->
+      <div class="setting-subsection">
+        <label class="subsection-label" for="default-calendar-select">
+          Default Device Calendar
+        </label>
+
+        <div v-if="availableCalendars.length > 0" class="calendar-picker-row">
+          <select
+            id="default-calendar-select"
+            class="settings-select"
+            :value="selectedDefaultCalendarId"
+            @change="handleCalendarSelectionChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">System Default Calendar</option>
+            <option
+              v-for="cal in availableCalendars"
+              :key="cal.id"
+              :value="cal.id"
+            >
+              {{ cal.title }} {{ cal.source_title ? `(${cal.source_title})` : "" }}
+            </option>
+          </select>
+        </div>
+
+        <div v-else class="permission-prompt-box">
+          <p class="prompt-text">
+            {{
+              calendarPermissionStatus === "denied" || calendarPermissionStatus === "restricted"
+                ? "Calendar permissions are disabled. Enable access in device Settings to select specific calendars."
+                : "Grant calendar access to list your synced iCloud, Google, and Exchange calendars."
+            }}
+          </p>
+          <button
+            v-if="calendarPermissionStatus === 'not_determined' || calendarPermissionStatus === 'write_only' || calendarPermissionStatus === 'unknown'"
+            type="button"
+            class="btn-grant-permission"
+            :disabled="isRequestingCalendarPermission"
+            @click="handleGrantPermission"
+          >
+            {{ isRequestingCalendarPermission ? "Requesting..." : "Grant Calendar Access" }}
+          </button>
+        </div>
+      </div>
+    </section>
 
     <!-- MAIN SETTING CARD: Text Parsing -->
     <section class="surface-card setting-section-card">
@@ -669,11 +883,10 @@ function setMode(mode: ParsingMode) {
       </section>
     </div>
 
-    <!-- Bottom Safety Note -->
+    <!-- Bottom Privacy & Safety Note -->
     <footer class="settings-footer">
       <p class="footer-hint">
-        Share2Cal operates 100% on your device. Your flyers and calendar entries are never
-        transmitted to any external server.
+        Share2Cal performs OCR and AI text extraction 100% locally on your device. Native calendar events are saved directly to your local device storage. If you choose Google Calendar, event parameters are opened in your web browser with Google.
       </p>
     </footer>
   </div>
@@ -828,6 +1041,11 @@ function setMode(mode: ParsingMode) {
   flex-shrink: 0;
 }
 
+.bubble-calendar {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+}
+
 .section-icon-bubble svg {
   width: 20px;
   height: 20px;
@@ -841,6 +1059,85 @@ function setMode(mode: ParsingMode) {
   letter-spacing: -0.01em;
 }
 
+.setting-subsection {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.subsection-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.target-toggle-track {
+  grid-template-columns: 1fr 1fr 1fr;
+  margin-bottom: 0.25rem;
+}
+
+.calendar-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-select {
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 12px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.settings-select:focus {
+  border-color: var(--accent-primary);
+}
+
+.permission-prompt-box {
+  padding: 0.85rem 1rem;
+  background: var(--bg-input);
+  border: 1px dashed var(--border-input);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.prompt-text {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.btn-grant-permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--accent-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btn-grant-permission:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .section-subheading {
   font-size: 0.8rem;
   color: var(--text-secondary);

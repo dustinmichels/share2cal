@@ -65,7 +65,8 @@ targets:
             CFBundleURLSchemes:
               - share2cal
         NSCalendarsUsageDescription: "Share2Cal uses your calendar to save events created from scanned images."
-        NSCalendarsWriteOnlyAccessUsageDescription: "Share2Cal needs write access to save events directly to your calendar."
+        NSCalendarsFullAccessUsageDescription: "Share2Cal needs full calendar access to list your calendars and save events to the selected calendar."
+        NSCalendarsWriteOnlyAccessUsageDescription: "Share2Cal needs access to save events directly to your calendar."
         NSCameraUsageDescription: "Share2Cal uses your camera to capture photos of event flyers, invitations, and schedules."
         NSPhotoLibraryUsageDescription: "Share2Cal needs access to your photo library to select flyer images and screenshots."
         NSPhotoLibraryAddUsageDescription: "Share2Cal needs permission to save images to your photo library."

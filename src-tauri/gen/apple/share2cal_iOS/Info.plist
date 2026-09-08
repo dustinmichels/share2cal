@@ -35,8 +35,10 @@
 	</array>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Share2Cal uses your calendar to save events created from scanned images.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Share2Cal needs full calendar access to list your calendars and save events to the selected calendar.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-	<string>Share2Cal needs write access to save events directly to your calendar.</string>
+	<string>Share2Cal needs access to save events directly to your calendar.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Share2Cal uses your camera to capture photos of event flyers, invitations, and schedules.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
