@@ -15,6 +15,14 @@ export interface CalendarResult {
   error?: string;
 }
 
+export interface BatchCalendarResult {
+  success: boolean;
+  total: number;
+  addedCount: number;
+  eventIds: string[];
+  errors?: string[];
+}
+
 function getErrorMessage(err: unknown): string {
   if (typeof err === "string") return err;
   if (err instanceof Error) return err.message;
@@ -64,6 +72,13 @@ export async function createCalendarEvent(event: EventDetails): Promise<string> 
 }
 
 /**
+ * Creates multiple events in the native device calendar.
+ */
+export async function createCalendarEvents(events: EventDetails[]): Promise<string[]> {
+  return await invoke<string[]>("create_calendar_events", { events });
+}
+
+/**
  * High-level helper to add an event to the native calendar.
  * Automatically checks and requests permission if needed, then saves the event.
  */
@@ -98,6 +113,72 @@ export async function addEventToNativeCalendar(event: EventDetails): Promise<Cal
     return {
       success: false,
       error: getErrorMessage(err),
+    };
+  }
+}
+
+/**
+ * High-level helper to add a list of events to the native calendar.
+ */
+export async function addEventsToNativeCalendar(
+  events: EventDetails[],
+): Promise<BatchCalendarResult> {
+  if (!events || events.length === 0) {
+    return { success: true, total: 0, addedCount: 0, eventIds: [] };
+  }
+
+  try {
+    const status = await checkCalendarPermission();
+
+    if (status === "denied" || status === "restricted") {
+      return {
+        success: false,
+        total: events.length,
+        addedCount: 0,
+        eventIds: [],
+        errors: ["Calendar access is denied. Please enable Calendar access in Settings."],
+      };
+    }
+
+    if (status === "not_determined") {
+      const granted = await requestCalendarPermission();
+      if (!granted) {
+        return {
+          success: false,
+          total: events.length,
+          addedCount: 0,
+          eventIds: [],
+          errors: ["Calendar access was not granted."],
+        };
+      }
+    }
+
+    const eventIds: string[] = [];
+    const errors: string[] = [];
+
+    for (const event of events) {
+      try {
+        const id = await createCalendarEvent(event);
+        eventIds.push(id);
+      } catch (err) {
+        errors.push(`${event.title}: ${getErrorMessage(err)}`);
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      total: events.length,
+      addedCount: eventIds.length,
+      eventIds,
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      total: events.length,
+      addedCount: 0,
+      eventIds: [],
+      errors: [getErrorMessage(err)],
     };
   }
 }

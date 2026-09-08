@@ -30,12 +30,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "iOS": {
-      "frameworks": ["Vision.framework", "ImageIO.framework", "EventKit.framework"]
-    },
-    "macOS": {
-      "frameworks": ["Vision", "ImageIO", "EventKit"]
-    }
+    ]
   }
 }

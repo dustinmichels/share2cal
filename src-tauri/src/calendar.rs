@@ -68,10 +68,10 @@ mod apple {
             location: *const c_char,
             notes: *const c_char,
             url: *const c_char,
+            recurrence_rule: *const c_char,
             out_event_id: *mut *mut c_char,
             out_error: *mut *mut c_char,
         ) -> c_int;
-
         fn calendar_apple_free_string(ptr: *mut c_char);
     }
 
@@ -167,12 +167,20 @@ mod apple {
             Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
             None => None,
         };
-
         let url_c: Option<CString> = None; // Reserved for URL if extended
+
+        let recurrence_rule_c = match event.recurrence_rule.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => {
+                let parsed = crate::parser::RecurrenceRule::parse_rrule(s)
+                    .map_err(|e| format!("Invalid recurrence rule: {}", e))?;
+                let normalized = parsed.to_rrule_string();
+                Some(CString::new(normalized).map_err(|e| e.to_string())?)
+            }
+            None => None,
+        };
 
         let mut out_event_id: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
-
         let code = unsafe {
             calendar_apple_create_event(
                 title_c.as_ptr(),
@@ -182,6 +190,7 @@ mod apple {
                 location_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 notes_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 url_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                recurrence_rule_c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
                 &mut out_event_id,
                 &mut out_error,
             )
@@ -229,6 +238,16 @@ pub use apple::*;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub use fallback::*;
+
+/// Batch helper to create multiple calendar events
+pub fn create_events(events: &[EventDetails]) -> Result<Vec<String>, String> {
+    let mut event_ids = Vec::new();
+    for event in events {
+        let id = create_event(event)?;
+        event_ids.push(id);
+    }
+    Ok(event_ids)
+}
 
 #[cfg(test)]
 mod tests {
@@ -281,6 +300,7 @@ mod tests {
             is_all_day: false,
             location: None,
             description: None,
+            recurrence_rule: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -299,6 +319,7 @@ mod tests {
             is_all_day: false,
             location: None,
             description: None,
+            recurrence_rule: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -306,6 +327,25 @@ mod tests {
         let result = create_event(&event);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Event title cannot be empty.");
+    }
+
+    #[test]
+    fn test_create_event_invalid_recurrence_rule() {
+        let event = EventDetails {
+            title: "Test Event".to_string(),
+            start_time: Some("2026-09-06T14:00:00Z".to_string()),
+            end_time: Some("2026-09-06T15:00:00Z".to_string()),
+            is_all_day: false,
+            location: None,
+            description: None,
+            recurrence_rule: Some("INTERVAL=2;BYDAY=MO".to_string()), // Missing required FREQ
+            confidence: 0.95,
+            source: "test".to_string(),
+        };
+
+        let result = create_event(&event);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid recurrence rule"));
     }
 
     #[test]

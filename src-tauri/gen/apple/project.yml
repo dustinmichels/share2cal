@@ -10,7 +10,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: share2cal
+      PRODUCT_NAME: Share2Cal
       PRODUCT_BUNDLE_IDENTIFIER: com.dustinmichels.share2cal
       DEVELOPMENT_TEAM: HFXMJ5M53V
       CODE_SIGN_STYLE: Automatic

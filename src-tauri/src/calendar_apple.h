@@ -30,6 +30,7 @@ int calendar_apple_create_event(
     const char *location,
     const char *notes,
     const char *url,
+    const char *recurrence_rule,
     char **out_event_id,
     char **out_error
 );

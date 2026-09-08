@@ -3,7 +3,7 @@
 #import <Vision/Vision.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
-
+#import <math.h>
 static char *create_c_string(NSString *str) {
     if (!str) return NULL;
     const char *utf8 = [str UTF8String];
@@ -48,7 +48,7 @@ static int perform_ocr_on_source(CGImageSourceRef imageSource, char **out_json, 
 
         for (VNRecognizedTextObservation *obs in observations) {
             VNRecognizedText *topCandidate = [[obs topCandidates:1] firstObject];
-            if (topCandidate) {
+            if (topCandidate && topCandidate.string.length > 0) {
                 NSString *str = topCandidate.string;
                 [textLines addObject:str];
 

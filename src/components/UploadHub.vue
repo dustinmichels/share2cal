@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
+
+const props = defineProps<{
+  isDragging?: boolean;
+}>();
 
 const emit = defineEmits<{
   (e: "selectFile", file: File): void;
@@ -7,21 +11,22 @@ const emit = defineEmits<{
   (e: "takePhoto"): void;
 }>();
 
-const isDragging = ref(false);
+const localDragging = ref(false);
+const activeDragging = computed(() => props.isDragging || localDragging.value);
 
 function handleDragOver(event: DragEvent) {
   event.preventDefault();
-  isDragging.value = true;
+  localDragging.value = true;
 }
 
 function handleDragLeave(event: DragEvent) {
   event.preventDefault();
-  isDragging.value = false;
+  localDragging.value = false;
 }
 
 function handleDrop(event: DragEvent) {
   event.preventDefault();
-  isDragging.value = false;
+  localDragging.value = false;
 
   if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
     emit("selectFile", event.dataTransfer.files[0]);
@@ -32,7 +37,7 @@ function handleDrop(event: DragEvent) {
 <template>
   <section
     class="upload-hub"
-    :class="{ 'is-dragging': isDragging }"
+    :class="{ 'is-dragging': activeDragging }"
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
     @drop="handleDrop"
@@ -55,7 +60,7 @@ function handleDrop(event: DragEvent) {
       </div>
       <h2 class="upload-title">Add Flyer or Screenshot</h2>
       <p class="upload-subtitle">
-        Choose a photo or snap a picture of an event flyer, invite, or schedule.
+        Drag and drop a flyer or screenshot here, or choose a file to begin.
       </p>
     </div>
 
@@ -97,7 +102,7 @@ function handleDrop(event: DragEvent) {
     </div>
 
     <div class="upload-footer">
-      <p class="format-note">Supports PNG, JPG, HEIF • Also paste images via ⌘V</p>
+      <p class="format-note">Supports PNG, JPG, HEIF, WebP • Drag & drop or paste via ⌘V</p>
     </div>
   </section>
 </template>

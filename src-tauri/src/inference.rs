@@ -25,6 +25,14 @@ pub struct LlmEventOutput {
     pub is_all_day: bool,
     pub location: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+}
+
+/// Wrapper matching the root JSON object with an `events` array
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LlmEventsPayload {
+    pub events: Vec<LlmEventOutput>,
 }
 
 impl LlmEventOutput {
@@ -36,17 +44,17 @@ impl LlmEventOutput {
             is_all_day: self.is_all_day,
             location: self.location,
             description: self.description,
+            recurrence_rule: self.recurrence_rule,
             confidence: 0.95,
             source: source_name.to_string(),
         }
     }
 }
-
 /// Default context window limit to minimize KV cache RAM footprint on mobile devices
 pub const DEFAULT_CONTEXT_WINDOW: u32 = 2048;
 
 /// Default maximum tokens generated for structured event JSON output
-pub const DEFAULT_MAX_GENERATION_TOKENS: usize = 512;
+pub const DEFAULT_MAX_GENERATION_TOKENS: usize = 1536;
 
 /// Default inference timeout in seconds
 pub const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 5;
@@ -285,15 +293,15 @@ pub async fn run_inference_async(
     }
 }
 
-/// Orchestrates event extraction using local LLM inference with dynamic context injection,
+/// Orchestrates multi-event extraction using local LLM inference with dynamic context injection,
 /// constrained GBNF sampling, 5-second timeout guard, and seamless deterministic fallback.
-pub async fn extract_event_orchestrated(
+pub async fn extract_events_orchestrated(
     app: &AppHandle,
     ocr_text: &str,
     context: &ReferenceContext,
     model_id_override: Option<&str>,
     timeout_secs: Option<u64>,
-) -> EventDetails {
+) -> Vec<EventDetails> {
     let start_time = Instant::now();
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_INFERENCE_TIMEOUT_SECS));
 
@@ -302,9 +310,11 @@ pub async fn extract_event_orchestrated(
         Ok(m) => m,
         Err(e) => {
             eprintln!("[Inference] Failed to load manifest: {}. Using deterministic fallback.", e);
-            let mut event = parser::parse_event_deterministic(ocr_text, context);
-            event.source = "deterministic_fallback".to_string();
-            return event;
+            let mut events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            return events;
         }
     };
 
@@ -315,9 +325,11 @@ pub async fn extract_event_orchestrated(
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("[Inference] Storage directory error: {}. Using fallback.", e);
-            let mut event = parser::parse_event_deterministic(ocr_text, context);
-            event.source = "deterministic_fallback".to_string();
-            return event;
+            let mut events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            return events;
         }
     };
 
@@ -326,18 +338,22 @@ pub async fn extract_event_orchestrated(
         Some(entry) => &entry.filename,
         None => {
             eprintln!("[Inference] Model ID '{}' not found in manifest. Using fallback.", target_model_id);
-            let mut event = parser::parse_event_deterministic(ocr_text, context);
-            event.source = "deterministic_fallback".to_string();
-            return event;
+            let mut events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            return events;
         }
     };
 
     let model_path = storage_dir.join(filename);
     if !model_path.exists() {
         eprintln!("[Inference] Model file {:?} does not exist. Using deterministic fallback.", model_path);
-        let mut event = parser::parse_event_deterministic(ocr_text, context);
-        event.source = "deterministic_fallback".to_string();
-        return event;
+        let mut events = parser::parse_events_deterministic(ocr_text, context);
+        for event in &mut events {
+            event.source = "deterministic_fallback".to_string();
+        }
+        return events;
     }
 
     // Load model
@@ -346,9 +362,11 @@ pub async fn extract_event_orchestrated(
         Ok(m) => m,
         Err(e) => {
             eprintln!("[Inference] Failed to load model weights: {}. Using fallback.", e);
-            let mut event = parser::parse_event_deterministic(ocr_text, context);
-            event.source = "deterministic_fallback".to_string();
-            return event;
+            let mut events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            return events;
         }
     };
 
@@ -359,28 +377,55 @@ pub async fn extract_event_orchestrated(
     match run_inference_async(model, prompt, DEFAULT_MAX_GENERATION_TOKENS, timeout).await {
         Ok(raw_json) => {
             let trimmed = raw_json.trim();
-            // Attempt to deserialize into LlmEventOutput conforming to GBNF grammar
-            match serde_json::from_str::<LlmEventOutput>(trimmed) {
-                Ok(llm_out) => {
-                    let event = llm_out.into_event_details("llm");
+            // 1. Attempt to deserialize into LlmEventsPayload {"events": [...]}
+            if let Ok(payload) = serde_json::from_str::<LlmEventsPayload>(trimmed) {
+                if !payload.events.is_empty() {
+                    let events: Vec<EventDetails> = payload
+                        .events
+                        .into_iter()
+                        .map(|e| e.into_event_details("llm"))
+                        .collect();
                     eprintln!(
-                        "[Inference] Successfully extracted event via LLM ({}) in {:.2}s: {}",
+                        "[Inference] Successfully extracted {} events via LLM ({}) in {:.2}s",
+                        events.len(),
                         target_model_id,
-                        start_time.elapsed().as_secs_f32(),
-                        event.title
+                        start_time.elapsed().as_secs_f32()
                     );
-                    event
-                }
-                Err(parse_err) => {
-                    eprintln!(
-                        "[Inference] Failed to parse LLM output JSON: '{}' (raw: '{}'). Falling back to deterministic parser.",
-                        parse_err, trimmed
-                    );
-                    let mut fallback_event = parser::parse_event_deterministic(ocr_text, context);
-                    fallback_event.source = "deterministic_fallback".to_string();
-                    fallback_event
+                    return events;
                 }
             }
+
+            // 2. Attempt to deserialize as a raw array [...]
+            if let Ok(list) = serde_json::from_str::<Vec<LlmEventOutput>>(trimmed) {
+                if !list.is_empty() {
+                    let events: Vec<EventDetails> = list
+                        .into_iter()
+                        .map(|e| e.into_event_details("llm"))
+                        .collect();
+                    eprintln!(
+                        "[Inference] Successfully extracted {} events via LLM array in {:.2}s",
+                        events.len(),
+                        start_time.elapsed().as_secs_f32()
+                    );
+                    return events;
+                }
+            }
+
+            // 3. Attempt single event object fallback
+            if let Ok(single) = serde_json::from_str::<LlmEventOutput>(trimmed) {
+                let event = single.into_event_details("llm");
+                return vec![event];
+            }
+
+            eprintln!(
+                "[Inference] Failed to parse LLM output JSON (raw: '{}'). Falling back to deterministic parser.",
+                trimmed
+            );
+            let mut fallback_events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut fallback_events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            fallback_events
         }
         Err(infer_err) => {
             eprintln!(
@@ -388,11 +433,29 @@ pub async fn extract_event_orchestrated(
                 start_time.elapsed().as_secs_f32(),
                 infer_err
             );
-            let mut fallback_event = parser::parse_event_deterministic(ocr_text, context);
-            fallback_event.source = "deterministic_fallback".to_string();
-            fallback_event
+            let mut fallback_events = parser::parse_events_deterministic(ocr_text, context);
+            for event in &mut fallback_events {
+                event.source = "deterministic_fallback".to_string();
+            }
+            fallback_events
         }
     }
+}
+
+/// Convenience single event extraction
+pub async fn extract_event_orchestrated(
+    app: &AppHandle,
+    ocr_text: &str,
+    context: &ReferenceContext,
+    model_id_override: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> EventDetails {
+    let events = extract_events_orchestrated(app, ocr_text, context, model_id_override, timeout_secs).await;
+    events.into_iter().next().unwrap_or_else(|| {
+        let mut fallback = parser::parse_event_deterministic(ocr_text, context);
+        fallback.source = "deterministic_fallback".to_string();
+        fallback
+    })
 }
 
 #[cfg(test)]
@@ -449,5 +512,36 @@ mod tests {
         assert!(!manager.is_model_loaded("smollm2-360m-instruct-q4_k_m").await);
         manager.unload_model().await;
         assert!(!manager.is_model_loaded("smollm2-360m-instruct-q4_k_m").await);
+    }
+
+    #[test]
+    fn test_llm_events_payload_conversion() {
+        let raw_json = r#"{
+            "events": [
+                {
+                    "title": "CS 0150-09 Special Topics",
+                    "start_time": "2026-09-11T14:00:00-04:00",
+                    "end_time": "2026-09-11T16:30:00-04:00",
+                    "is_all_day": false,
+                    "location": "Online",
+                    "description": "Faculty: J. Skripchuk"
+                },
+                {
+                    "title": "CSHD 0166-01 Children's Play",
+                    "start_time": "2026-09-10T13:30:00-04:00",
+                    "end_time": "2026-09-10T16:00:00-04:00",
+                    "is_all_day": false,
+                    "location": "Eliot-Pearson, Room 157",
+                    "description": "Faculty: W. Scarlett"
+                }
+            ]
+        }"#;
+
+        let payload: LlmEventsPayload = serde_json::from_str(raw_json).expect("Should parse multi-event JSON");
+        assert_eq!(payload.events.len(), 2);
+        let details: Vec<EventDetails> = payload.events.into_iter().map(|e| e.into_event_details("llm")).collect();
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].title, "CS 0150-09 Special Topics");
+        assert_eq!(details[1].location.as_deref(), Some("Eliot-Pearson, Room 157"));
     }
 }

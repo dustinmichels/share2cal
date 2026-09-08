@@ -308,6 +308,60 @@ pub fn stage_shared_image(
 
     Ok(payload)
 }
+/// Reads an image from the filesystem given its path (e.g. from a drag-and-drop event).
+pub fn load_image_from_path(path: &str) -> Result<SharedImagePayload, String> {
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(format!("File does not exist at path: {}", path));
+    }
+    let metadata = fs::metadata(p).map_err(|e| format!("Failed to read metadata: {}", e))?;
+    if metadata.is_dir() {
+        return Err("Dropped item is a directory, not an image file".to_string());
+    }
+
+    let file_name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "dropped_image.png".to_string());
+
+    let ext = p
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let mime_type = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+    .to_string();
+
+    let bytes = fs::read(p).map_err(|e| format!("Failed to read file bytes: {}", e))?;
+    let timestamp = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    Ok(SharedImagePayload {
+        file_name,
+        file_path: path.to_string(),
+        mime_type,
+        size_bytes: metadata.len() as usize,
+        timestamp,
+        source: "drag_and_drop".to_string(),
+        bytes: Some(bytes),
+    })
+}
+
 
 #[cfg(test)]
 pub(crate) static TEST_SHARE_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -354,5 +408,42 @@ mod tests {
         let _guard = TEST_SHARE_MUTEX.lock().unwrap();
         let result = stage_shared_image(&[], "empty.png", None);
         assert!(result.is_err(), "Empty bytes must return an error");
+    }
+
+    #[test]
+    fn test_load_image_from_path_success() {
+        let _guard = TEST_SHARE_MUTEX.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("share2cal_test_load_image");
+        let _ = fs::create_dir_all(&temp_dir);
+        let temp_file = temp_dir.join("test_sample.png");
+        let sample_bytes = b"mock-png-content-for-drag-drop-test";
+        fs::write(&temp_file, sample_bytes).expect("Write temp image file");
+
+        let loaded = load_image_from_path(&temp_file.to_string_lossy()).expect("Load image from path");
+        assert_eq!(loaded.file_name, "test_sample.png");
+        assert_eq!(loaded.mime_type, "image/png");
+        assert_eq!(loaded.size_bytes, sample_bytes.len());
+        assert_eq!(loaded.source, "drag_and_drop");
+        assert_eq!(loaded.bytes.unwrap(), sample_bytes.to_vec());
+
+        let _ = fs::remove_file(temp_file);
+    }
+
+    #[test]
+    fn test_load_image_from_path_nonexistent() {
+        let _guard = TEST_SHARE_MUTEX.lock().unwrap();
+        let non_existent = std::env::temp_dir().join("definitely_non_existent_image_12345.png");
+        let result = load_image_from_path(&non_existent.to_string_lossy());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_load_image_from_path_directory() {
+        let _guard = TEST_SHARE_MUTEX.lock().unwrap();
+        let temp_dir = std::env::temp_dir();
+        let result = load_image_from_path(&temp_dir.to_string_lossy());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("directory"));
     }
 }

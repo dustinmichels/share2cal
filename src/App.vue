@@ -1,26 +1,37 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { extractTextFromBytes, type OcrResult } from "./services/ocr";
 import {
-  parseEventFromText,
+  parseEventsFromText,
   downloadIcsFile,
+  downloadMultiIcsFile,
   addEventToNativeCalendar,
+  addEventsToNativeCalendar,
+  formatDateForDisplay,
+  formatTimeForDisplay,
   extractDateInput,
   extractTimeInput,
   buildIsoFromDateTime,
   type EventDetails,
   type EventFormData,
 } from "./services/event";
-import { getPendingSharedImage, clearPendingSharedImage, payloadToFile } from "./services/share";
+import {
+  getPendingSharedImage,
+  clearPendingSharedImage,
+  payloadToFile,
+  loadImageFromPath,
+} from "./services/share";
 import { getModelStatuses, type ModelStatus } from "./services/model";
 import { getStoredParsingMode, setStoredParsingMode, type ParsingMode } from "./services/settings";
 import UploadHub from "./components/UploadHub.vue";
 import ImagePreviewCard from "./components/ImagePreviewCard.vue";
+import EventPreviewCard from "./components/EventPreviewCard.vue";
 import EventFormCard from "./components/EventFormCard.vue";
 import OcrDrawer from "./components/OcrDrawer.vue";
 import SettingsNavCard from "./components/SettingsNavCard.vue";
 import SettingsView from "./components/SettingsView.vue";
-
 const currentView = ref<"main" | "settings">("main");
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
 
@@ -51,11 +62,81 @@ const previewUrl = ref<string | null>(null);
 const isProcessing = ref(false);
 const errorMessage = ref<string | null>(null);
 const ocrResult = ref<OcrResult | null>(null);
-const eventDetails = ref<EventDetails | null>(null);
+const eventsList = ref<EventDetails[]>([]);
+const selectedEventIndex = ref<number | null>(null);
+const addedEventIndices = ref<Set<number>>(new Set());
 
 const shareNotification = ref<string | null>(null);
 const isFromShareExtension = ref(false);
 const copiedSummary = ref(false);
+
+const isWindowDragging = ref(false);
+let unlistenDragDrop: (() => void) | null = null;
+
+async function handleDroppedPaths(paths: string[]) {
+  if (!paths || paths.length === 0) return;
+  const imageExtRegex = /\.(heic|heif|png|jpe?g|webp|bmp|gif|tiff?|svg)$/i;
+  const targetPath = paths.find((p) => imageExtRegex.test(p)) || paths[0];
+
+  try {
+    const file = await loadImageFromPath(targetPath);
+    if (file) {
+      if (currentView.value !== "main") {
+        currentView.value = "main";
+      }
+      setImageFile(file);
+    } else {
+      errorMessage.value = "Could not load the dropped file.";
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errorMessage.value = `Failed to open dropped file: ${msg}`;
+  }
+}
+
+function handleWindowDragOver(event: DragEvent) {
+  event.preventDefault();
+  isWindowDragging.value = true;
+}
+
+function handleWindowDragLeave(event: DragEvent) {
+  event.preventDefault();
+  if (!event.relatedTarget || event.relatedTarget === document.documentElement) {
+    isWindowDragging.value = false;
+  }
+}
+
+function handleWindowDrop(event: DragEvent) {
+  event.preventDefault();
+  isWindowDragging.value = false;
+  const files = event.dataTransfer?.files;
+  if (files && files.length > 0) {
+    if (currentView.value !== "main") {
+      currentView.value = "main";
+    }
+    setImageFile(files[0]);
+  }
+}
+
+async function setupDragDrop() {
+  if (isTauri()) {
+    try {
+      const webview = getCurrentWebview();
+      unlistenDragDrop = await webview.onDragDropEvent(async (event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          isWindowDragging.value = true;
+        } else if (event.payload.type === "leave") {
+          isWindowDragging.value = false;
+        } else if (event.payload.type === "drop") {
+          isWindowDragging.value = false;
+          await handleDroppedPaths(event.payload.paths);
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to attach Tauri drag drop listener:", err);
+    }
+  }
+}
 const calendarDownloaded = ref(false);
 const isAddingToCalendar = ref(false);
 const calendarSuccessMessage = ref<string | null>(null);
@@ -63,7 +144,7 @@ const calendarErrorMessage = ref<string | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const cameraInputRef = ref<HTMLInputElement | null>(null);
 
-// Editable event form model
+// Editable event form model for the active edit screen
 const eventForm = ref<EventFormData>({
   title: "",
   date: "",
@@ -72,6 +153,7 @@ const eventForm = ref<EventFormData>({
   isAllDay: false,
   location: "",
   description: "",
+  recurrenceRule: "",
 });
 
 function syncFormFromEvent(event: EventDetails) {
@@ -83,14 +165,50 @@ function syncFormFromEvent(event: EventDetails) {
     isAllDay: event.is_all_day,
     location: event.location || "",
     description: event.description || "",
+    recurrenceRule: event.recurrence_rule || "",
   };
 }
 
-watch(eventDetails, (newVal) => {
-  if (newVal) {
-    syncFormFromEvent(newVal);
+function openEditScreen(index: number) {
+  if (index >= 0 && index < eventsList.value.length) {
+    selectedEventIndex.value = index;
+    syncFormFromEvent(eventsList.value[index]);
   }
-});
+}
+
+function closeEditScreen() {
+  if (selectedEventIndex.value !== null && selectedEventIndex.value < eventsList.value.length) {
+    eventsList.value[selectedEventIndex.value] = getComposedEvent();
+  }
+  selectedEventIndex.value = null;
+}
+
+function handleRemoveEvent(index: number) {
+  if (index >= 0 && index < eventsList.value.length) {
+    eventsList.value.splice(index, 1);
+    const nextAdded = new Set<number>();
+    for (const addedIdx of addedEventIndices.value) {
+      if (addedIdx < index) {
+        nextAdded.add(addedIdx);
+      } else if (addedIdx > index) {
+        nextAdded.add(addedIdx - 1);
+      }
+    }
+    addedEventIndices.value = nextAdded;
+    if (selectedEventIndex.value === index) {
+      selectedEventIndex.value = null;
+    } else if (selectedEventIndex.value !== null && selectedEventIndex.value > index) {
+      selectedEventIndex.value -= 1;
+    }
+  }
+}
+
+function handleRemoveCurrentEvent() {
+  if (selectedEventIndex.value !== null) {
+    handleRemoveEvent(selectedEventIndex.value);
+    selectedEventIndex.value = null;
+  }
+}
 
 function isImageFile(file: File): boolean {
   if (!file) return false;
@@ -121,7 +239,9 @@ function setImageFile(file: File) {
   previewUrl.value = URL.createObjectURL(file);
   errorMessage.value = null;
   ocrResult.value = null;
-  eventDetails.value = null;
+  eventsList.value = [];
+  selectedEventIndex.value = null;
+  addedEventIndices.value = new Set();
   calendarDownloaded.value = false;
 }
 
@@ -180,11 +300,15 @@ async function handleGo() {
     if (!res.text.trim()) {
       errorMessage.value =
         "No text was detected in this image. Try another photo with clearer text.";
-      eventDetails.value = null;
+      eventsList.value = [];
+      selectedEventIndex.value = null;
+      addedEventIndices.value = new Set();
     } else {
-      // Parse event details from the extracted OCR text
-      const parsed = await parseEventFromText(res.text);
-      eventDetails.value = parsed;
+      // Parse multiple or single event details from the extracted OCR text
+      const parsed = await parseEventsFromText(res.text);
+      eventsList.value = parsed;
+      selectedEventIndex.value = null;
+      addedEventIndices.value = new Set();
     }
   } catch (err: unknown) {
     errorMessage.value =
@@ -199,8 +323,10 @@ async function handleGo() {
 async function handleReparse() {
   if (!ocrResult.value?.text) return;
   try {
-    const parsed = await parseEventFromText(ocrResult.value.text);
-    eventDetails.value = parsed;
+    const parsed = await parseEventsFromText(ocrResult.value.text);
+    eventsList.value = parsed;
+    selectedEventIndex.value = null;
+    addedEventIndices.value = new Set();
   } catch (err: unknown) {
     errorMessage.value =
       err instanceof Error ? err.message : String(err) || "Failed to re-parse event details.";
@@ -223,13 +349,68 @@ function getComposedEvent(): EventDetails {
     is_all_day: eventForm.value.isAllDay,
     location: eventForm.value.location.trim() || null,
     description: eventForm.value.description.trim() || null,
-    confidence: eventDetails.value?.confidence ?? 0.8,
-    source: eventDetails.value?.source ?? "deterministic",
+    recurrence_rule: eventForm.value.recurrenceRule?.trim() || null,
+    confidence:
+      selectedEventIndex.value !== null
+        ? eventsList.value[selectedEventIndex.value]?.confidence ?? 0.8
+        : 0.8,
+    source:
+      selectedEventIndex.value !== null
+        ? eventsList.value[selectedEventIndex.value]?.source ?? "deterministic"
+        : "deterministic",
   };
 }
 
-async function handleAddToCalendar() {
+async function handleBatchAddToCalendar() {
+  if (eventsList.value.length === 0) return;
+  isAddingToCalendar.value = true;
+  calendarSuccessMessage.value = null;
+  calendarErrorMessage.value = null;
+  calendarDownloaded.value = false;
+
+  try {
+    const result = await addEventsToNativeCalendar(eventsList.value);
+    if (result.success || result.addedCount > 0) {
+      const newSet = new Set<number>();
+      for (let i = 0; i < eventsList.value.length; i++) {
+        newSet.add(i);
+      }
+      addedEventIndices.value = newSet;
+
+      if (result.addedCount === eventsList.value.length) {
+        calendarSuccessMessage.value =
+          eventsList.value.length === 1
+            ? `Event "${eventsList.value[0].title}" was added directly to your Calendar!`
+            : `All ${result.addedCount} events were added directly to your Calendar!`;
+      } else {
+        calendarSuccessMessage.value = `Added ${result.addedCount} of ${eventsList.value.length} events to your Calendar.`;
+      }
+
+      setTimeout(() => {
+        calendarSuccessMessage.value = null;
+      }, 5000);
+    } else {
+      calendarErrorMessage.value =
+        result.errors?.join("; ") || "Failed to add events to native calendar.";
+      downloadMultiIcsFile(eventsList.value);
+      setTimeout(() => {
+        calendarErrorMessage.value = null;
+      }, 6000);
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    calendarErrorMessage.value = msg;
+    downloadMultiIcsFile(eventsList.value);
+  } finally {
+    isAddingToCalendar.value = false;
+  }
+}
+
+async function handleSingleAddToCalendar() {
   const event = getComposedEvent();
+  if (selectedEventIndex.value !== null) {
+    eventsList.value[selectedEventIndex.value] = event;
+  }
   isAddingToCalendar.value = true;
   calendarSuccessMessage.value = null;
   calendarErrorMessage.value = null;
@@ -238,13 +419,15 @@ async function handleAddToCalendar() {
   try {
     const result = await addEventToNativeCalendar(event);
     if (result.success) {
+      if (selectedEventIndex.value !== null) {
+        addedEventIndices.value.add(selectedEventIndex.value);
+      }
       calendarSuccessMessage.value = `Event "${event.title}" was added directly to your Calendar!`;
       setTimeout(() => {
         calendarSuccessMessage.value = null;
       }, 5000);
     } else {
       calendarErrorMessage.value = result.error || "Failed to add event to native calendar.";
-      // Fallback: download .ics file so the user never loses their event
       downloadIcsFile(event);
       setTimeout(() => {
         calendarErrorMessage.value = null;
@@ -260,7 +443,19 @@ async function handleAddToCalendar() {
 }
 
 function handleExportIcs() {
+  if (eventsList.value.length === 0) return;
+  downloadMultiIcsFile(eventsList.value);
+  calendarDownloaded.value = true;
+  setTimeout(() => {
+    calendarDownloaded.value = false;
+  }, 4000);
+}
+
+function handleSingleExportIcs() {
   const event = getComposedEvent();
+  if (selectedEventIndex.value !== null) {
+    eventsList.value[selectedEventIndex.value] = event;
+  }
   downloadIcsFile(event);
   calendarDownloaded.value = true;
   setTimeout(() => {
@@ -269,6 +464,47 @@ function handleExportIcs() {
 }
 
 async function copySummary() {
+  if (eventsList.value.length === 0) return;
+  const lines: string[] = [];
+
+  if (eventsList.value.length === 1) {
+    const event = selectedEventIndex.value !== null ? getComposedEvent() : eventsList.value[0];
+    lines.push(`📅 ${event.title}`);
+    lines.push(
+      event.is_all_day
+        ? `Date: ${formatDateForDisplay(event.start_time)} (All day)`
+        : `Date & Time: ${formatDateForDisplay(event.start_time)} (${formatTimeForDisplay(event.start_time)} - ${formatTimeForDisplay(event.end_time)})`,
+    );
+    if (event.location) lines.push(`📍 Location: ${event.location}`);
+    if (event.description) lines.push(`📝 Notes: ${event.description}`);
+  } else {
+    lines.push(`📋 Schedule Summary (${eventsList.value.length} Events)`);
+    lines.push("");
+    eventsList.value.forEach((ev, idx) => {
+      lines.push(`${idx + 1}. ${ev.title}`);
+      lines.push(
+        ev.is_all_day
+          ? `   Date: ${formatDateForDisplay(ev.start_time)} (All day)`
+          : `   Time: ${formatDateForDisplay(ev.start_time)} (${formatTimeForDisplay(ev.start_time)} - ${formatTimeForDisplay(ev.end_time)})`,
+      );
+      if (ev.location) lines.push(`   Location: ${ev.location}`);
+      if (ev.description) lines.push(`   Notes: ${ev.description}`);
+      lines.push("");
+    });
+  }
+
+  try {
+    await navigator.clipboard.writeText(lines.join("\n").trim());
+    copiedSummary.value = true;
+    setTimeout(() => {
+      copiedSummary.value = false;
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy summary:", err);
+  }
+}
+
+async function copySingleSummary() {
   const event = getComposedEvent();
   const lines = [
     `📅 ${event.title}`,
@@ -286,7 +522,7 @@ async function copySummary() {
       copiedSummary.value = false;
     }, 2000);
   } catch (err) {
-    console.error("Failed to copy summary:", err);
+    console.error("Failed to copy single summary:", err);
   }
 }
 
@@ -297,7 +533,9 @@ function handleReset() {
   selectedFile.value = null;
   previewUrl.value = null;
   ocrResult.value = null;
-  eventDetails.value = null;
+  eventsList.value = [];
+  selectedEventIndex.value = null;
+  addedEventIndices.value = new Set();
   errorMessage.value = null;
   calendarDownloaded.value = false;
   calendarSuccessMessage.value = null;
@@ -305,6 +543,8 @@ function handleReset() {
   isFromShareExtension.value = false;
   shareNotification.value = null;
 }
+
+
 
 async function checkPendingShare() {
   try {
@@ -335,6 +575,10 @@ onMounted(() => {
   window.addEventListener("paste", handlePaste);
   window.addEventListener("focus", checkPendingShare);
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("dragover", handleWindowDragOver);
+  window.addEventListener("dragleave", handleWindowDragLeave);
+  window.addEventListener("drop", handleWindowDrop);
+  setupDragDrop();
   checkPendingShare();
   refreshModelStatus();
 });
@@ -343,6 +587,13 @@ onUnmounted(() => {
   window.removeEventListener("paste", handlePaste);
   window.removeEventListener("focus", checkPendingShare);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
+  window.removeEventListener("dragover", handleWindowDragOver);
+  window.removeEventListener("dragleave", handleWindowDragLeave);
+  window.removeEventListener("drop", handleWindowDrop);
+  if (unlistenDragDrop) {
+    unlistenDragDrop();
+    unlistenDragDrop = null;
+  }
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value);
   }
@@ -553,6 +804,7 @@ onUnmounted(() => {
         <!-- STATE 1: Empty Upload Hub (No Image Selected) -->
         <div v-if="!selectedFile" class="empty-hub-flow">
           <UploadHub
+            :is-dragging="isWindowDragging"
             @select-file="setImageFile"
             @choose-file="triggerFileUpload"
             @take-photo="triggerCameraCapture"
@@ -567,25 +819,42 @@ onUnmounted(() => {
             :preview-url="previewUrl"
             :is-processing="isProcessing"
             :is-from-share-extension="isFromShareExtension"
-            :has-event="!!eventDetails"
+            :has-event="eventsList.length > 0"
             @scan="handleGo"
             @remove="handleReset"
             @choose-another="triggerFileUpload"
             @take-photo="triggerCameraCapture"
           />
 
-          <!-- Event Details Form Section -->
-          <EventFormCard
-            v-if="eventDetails"
-            v-model="eventForm"
-            :confidence="eventDetails.confidence"
+          <!-- PREVIEW VIEW: Event Summary / List of Events -->
+          <EventPreviewCard
+            v-if="eventsList.length > 0 && selectedEventIndex === null"
+            :events="eventsList"
             :is-adding-to-calendar="isAddingToCalendar"
             :copied-summary="copiedSummary"
-            @add-to-calendar="handleAddToCalendar"
+            :added-indices="addedEventIndices"
+            @edit-event="openEditScreen"
+            @add-to-calendar="handleBatchAddToCalendar"
             @export-ics="handleExportIcs"
             @copy-summary="copySummary"
+            @remove-event="handleRemoveEvent"
           />
 
+          <!-- EDIT VIEW: Detailed Event Editing Screen -->
+          <EventFormCard
+            v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
+            v-model="eventForm"
+            :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
+            :is-adding-to-calendar="isAddingToCalendar"
+            :copied-summary="copiedSummary"
+            :current-index="selectedEventIndex"
+            :total-events="eventsList.length"
+            @back="closeEditScreen"
+            @add-to-calendar="handleSingleAddToCalendar"
+            @export-ics="handleSingleExportIcs"
+            @copy-summary="copySingleSummary"
+            @remove="handleRemoveCurrentEvent"
+          />
           <!-- Collapsible Raw OCR Diagnostics Drawer -->
           <OcrDrawer v-if="ocrResult" :ocr-result="ocrResult" @reparse="handleReparse" />
         </section>
@@ -607,6 +876,29 @@ onUnmounted(() => {
         @back="currentView = 'main'"
         @models-updated="refreshModelStatus"
       />
+
+      <!-- Drop Overlay for when an image is already selected or on other views -->
+      <div v-if="isWindowDragging && selectedFile" class="drop-target-overlay">
+        <div class="drop-target-content">
+          <div class="drop-target-icon-bubble">
+            <svg
+              class="drop-target-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </div>
+          <h3 class="drop-target-title">Drop new image to replace</h3>
+          <p class="drop-target-desc">Supports PNG, JPG, HEIF, WebP</p>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -883,6 +1175,75 @@ onUnmounted(() => {
     background: #450a0a;
     border-color: #7f1d1d;
     color: #fca5a5;
+  }
+}
+
+/* Drop Target Overlay */
+.drop-target-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: fadeInOverlay 0.15s ease-out;
+}
+
+.drop-target-content {
+  background: var(--bg-card);
+  border: 2px dashed var(--accent-primary);
+  border-radius: var(--radius-card);
+  padding: 2.5rem 2rem;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 360px;
+  width: 90%;
+}
+
+.drop-target-icon-bubble {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drop-target-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.drop-target-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.drop-target-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+@keyframes fadeInOverlay {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 </style>

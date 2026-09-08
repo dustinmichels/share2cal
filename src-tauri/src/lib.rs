@@ -7,11 +7,12 @@ pub mod share;
 use ocr::{extract_text_from_bytes, extract_text_from_path, OcrResult};
 use parser::{
     generate_extraction_prompt, get_gbnf_grammar, get_json_schema, parse_event_deterministic,
-    EventDetails, ReferenceContext,
+    parse_events_deterministic, EventDetails, ReferenceContext,
 };
 use share::{
     clear_pending_shared_image as clear_shared,
     get_pending_shared_image as get_shared,
+    load_image_from_path as load_image,
     stage_shared_image as stage_shared,
     SharedImagePayload,
 };
@@ -32,14 +33,14 @@ fn extract_text_from_image_bytes(bytes: Vec<u8>) -> Result<OcrResult, String> {
     extract_text_from_bytes(&bytes)
 }
 
-pub async fn parse_event_internal(
+pub async fn parse_events_internal(
     app: Option<&tauri::AppHandle>,
     text: &str,
     reference_time: Option<String>,
     timezone_offset_minutes: Option<i32>,
     model_id: Option<&str>,
     timeout_secs: Option<u64>,
-) -> EventDetails {
+) -> Vec<EventDetails> {
     let context = if reference_time.is_some() || timezone_offset_minutes.is_some() {
         ReferenceContext {
             reference_time,
@@ -50,7 +51,7 @@ pub async fn parse_event_internal(
     };
 
     if let Some(app_handle) = app {
-        inference::extract_event_orchestrated(
+        inference::extract_events_orchestrated(
             app_handle,
             text,
             &context,
@@ -58,8 +59,52 @@ pub async fn parse_event_internal(
             timeout_secs,
         ).await
     } else {
-        parse_event_deterministic(text, &context)
+        parse_events_deterministic(text, &context)
     }
+}
+
+pub async fn parse_event_internal(
+    app: Option<&tauri::AppHandle>,
+    text: &str,
+    reference_time: Option<String>,
+    timezone_offset_minutes: Option<i32>,
+    model_id: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> EventDetails {
+    let events = parse_events_internal(
+        app,
+        text,
+        reference_time.clone(),
+        timezone_offset_minutes,
+        model_id,
+        timeout_secs,
+    ).await;
+    events.into_iter().next().unwrap_or_else(|| {
+        let context = ReferenceContext {
+            reference_time,
+            timezone_offset_minutes,
+        };
+        parse_event_deterministic(text, &context)
+    })
+}
+
+#[tauri::command]
+async fn parse_events_from_text(
+    app: tauri::AppHandle,
+    text: String,
+    reference_time: Option<String>,
+    timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<EventDetails>, String> {
+    Ok(parse_events_internal(
+        Some(&app),
+        &text,
+        reference_time,
+        timezone_offset_minutes,
+        model_id.as_deref(),
+        timeout_secs,
+    ).await)
 }
 
 #[tauri::command]
@@ -82,6 +127,40 @@ async fn parse_event_from_text(
 }
 
 #[tauri::command]
+async fn extract_events_from_image(
+    app: tauri::AppHandle,
+    path: String,
+    reference_time: Option<String>,
+    timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<EventDetails>, String> {
+    let ocr_res = extract_text_from_path(&path)?;
+    let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+    let context = ReferenceContext {
+        reference_time: reference_time.clone(),
+        timezone_offset_minutes,
+    };
+
+    let effective_text = if !spatial_text.trim().is_empty()
+        && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
+    {
+        &spatial_text
+    } else {
+        &ocr_res.text
+    };
+
+    Ok(parse_events_internal(
+        Some(&app),
+        effective_text,
+        reference_time,
+        timezone_offset_minutes,
+        model_id.as_deref(),
+        timeout_secs,
+    ).await)
+}
+
+#[tauri::command]
 async fn extract_event_from_image(
     app: tauri::AppHandle,
     path: String,
@@ -90,10 +169,54 @@ async fn extract_event_from_image(
     model_id: Option<String>,
     timeout_secs: Option<u64>,
 ) -> Result<EventDetails, String> {
-    let ocr_res = extract_text_from_path(&path)?;
-    Ok(parse_event_internal(
+    let events = extract_events_from_image(
+        app,
+        path,
+        reference_time,
+        timezone_offset_minutes,
+        model_id,
+        timeout_secs,
+    ).await?;
+    Ok(events.into_iter().next().unwrap_or_else(|| EventDetails {
+        title: "New Event".to_string(),
+        start_time: None,
+        end_time: None,
+        is_all_day: true,
+        location: None,
+        description: None,
+        recurrence_rule: None,
+        confidence: 0.5,
+        source: "empty".to_string(),
+    }))
+}
+
+#[tauri::command]
+async fn extract_events_from_image_bytes(
+    app: tauri::AppHandle,
+    bytes: Vec<u8>,
+    reference_time: Option<String>,
+    timezone_offset_minutes: Option<i32>,
+    model_id: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<EventDetails>, String> {
+    let ocr_res = extract_text_from_bytes(&bytes)?;
+    let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+    let context = ReferenceContext {
+        reference_time: reference_time.clone(),
+        timezone_offset_minutes,
+    };
+
+    let effective_text = if !spatial_text.trim().is_empty()
+        && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
+    {
+        &spatial_text
+    } else {
+        &ocr_res.text
+    };
+
+    Ok(parse_events_internal(
         Some(&app),
-        &ocr_res.text,
+        effective_text,
         reference_time,
         timezone_offset_minutes,
         model_id.as_deref(),
@@ -110,16 +233,27 @@ async fn extract_event_from_image_bytes(
     model_id: Option<String>,
     timeout_secs: Option<u64>,
 ) -> Result<EventDetails, String> {
-    let ocr_res = extract_text_from_bytes(&bytes)?;
-    Ok(parse_event_internal(
-        Some(&app),
-        &ocr_res.text,
+    let events = extract_events_from_image_bytes(
+        app,
+        bytes,
         reference_time,
         timezone_offset_minutes,
-        model_id.as_deref(),
+        model_id,
         timeout_secs,
-    ).await)
+    ).await?;
+    Ok(events.into_iter().next().unwrap_or_else(|| EventDetails {
+        title: "New Event".to_string(),
+        start_time: None,
+        end_time: None,
+        is_all_day: true,
+        location: None,
+        description: None,
+        recurrence_rule: None,
+        confidence: 0.5,
+        source: "empty".to_string(),
+    }))
 }
+
 #[tauri::command]
 async fn unload_inference_model() -> Result<(), String> {
     inference::InferenceEngineManager::global().unload_model().await;
@@ -173,8 +307,18 @@ fn stage_shared_image(
 }
 
 #[tauri::command]
+fn load_image_from_path(path: String) -> Result<SharedImagePayload, String> {
+    load_image(&path)
+}
+
+#[tauri::command]
 fn create_calendar_event(event: EventDetails) -> Result<String, String> {
     calendar::create_event(&event)
+}
+
+#[tauri::command]
+fn create_calendar_events(events: Vec<EventDetails>) -> Result<Vec<String>, String> {
+    calendar::create_events(&events)
 }
 
 #[tauri::command]
@@ -240,8 +384,11 @@ pub fn run() {
             greet,
             extract_text_from_image,
             extract_text_from_image_bytes,
+            parse_events_from_text,
             parse_event_from_text,
+            extract_events_from_image,
             extract_event_from_image,
+            extract_events_from_image_bytes,
             extract_event_from_image_bytes,
             get_event_schema,
             get_event_gbnf_grammar,
@@ -250,6 +397,8 @@ pub fn run() {
             clear_pending_shared_image,
             stage_shared_image,
             create_calendar_event,
+            load_image_from_path,
+            create_calendar_events,
             check_calendar_permission,
             request_calendar_permission,
             get_model_manifest,
@@ -299,6 +448,40 @@ mod tests {
         assert!(event.end_time.unwrap().starts_with("2026-09-12T17:00:00"));
         assert!(event.location.is_some());
         assert!(event.description.is_some());
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    async fn test_extract_events_plural_from_sample_flyer() {
+        let sample = get_sample_path("gilman_flyer.png");
+        let ocr_res = extract_text_from_path(sample.to_str().unwrap())
+            .expect("Should run OCR on sample flyer");
+        let spatial_text = ocr::reconstruct_spatial_lines(&ocr_res.lines);
+        let context = ReferenceContext {
+            reference_time: Some("2026-09-06T12:00:00-04:00".to_string()),
+            timezone_offset_minutes: Some(-240),
+        };
+        let effective_text = if !spatial_text.trim().is_empty()
+            && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
+        {
+            &spatial_text
+        } else {
+            &ocr_res.text
+        };
+        let events = parse_events_internal(
+            None,
+            effective_text,
+            Some("2026-09-06T12:00:00-04:00".to_string()),
+            Some(-240),
+            None,
+            None,
+        )
+        .await;
+        assert!(!events.is_empty());
+        assert!(events[0].title.contains("GILMAN SQUARE") || events[0].title.contains("FESTIVAL"));
+        assert!(events[0].start_time.as_ref().unwrap().starts_with("2026-09-12T12:00:00"));
+        assert!(events[0].end_time.as_ref().unwrap().starts_with("2026-09-12T17:00:00"));
+        assert!(events[0].description.is_some());
     }
 
     #[test]

@@ -13,8 +13,147 @@ pub struct EventDetails {
     pub is_all_day: bool,
     pub location: Option<String>,
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
     pub confidence: f32,
     pub source: String,
+}
+
+/// Strongly typed recurrence rule representation matching RFC 5545
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecurrenceRule {
+    pub frequency: String, // "DAILY", "WEEKLY", "MONTHLY", "YEARLY"
+    pub interval: u32,
+    pub by_days: Vec<String>, // ["MO", "WE"]
+    pub until: Option<String>,
+    pub count: Option<u32>,
+}
+
+impl RecurrenceRule {
+    pub fn new_weekly(by_days: Vec<String>, until: Option<String>) -> Self {
+        Self {
+            frequency: "WEEKLY".to_string(),
+            interval: 1,
+            by_days,
+            until,
+            count: None,
+        }
+    }
+
+    pub fn to_rrule_string(&self) -> String {
+        let mut parts = vec![format!("FREQ={}", self.frequency)];
+        if self.interval > 1 {
+            parts.push(format!("INTERVAL={}", self.interval));
+        }
+        if !self.by_days.is_empty() {
+            parts.push(format!("BYDAY={}", self.by_days.join(",")));
+        }
+        if let Some(ref until) = self.until {
+            let clean_until = until.replace(['-', ':'], "");
+            if clean_until.len() == 8 {
+                parts.push(format!("UNTIL={}T235959", clean_until));
+            } else {
+                parts.push(format!("UNTIL={}", clean_until));
+            }
+        } else if let Some(count) = self.count {
+            parts.push(format!("COUNT={}", count));
+        }
+        parts.join(";")
+    }
+
+    pub fn parse_rrule(s: &str) -> Result<Self, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("Empty recurrence rule string.".to_string());
+        }
+        let clean = if let Some(stripped) = trimmed.strip_prefix("RRULE:") {
+            stripped
+        } else {
+            trimmed
+        };
+
+        let mut freq = None;
+        let mut interval = 1;
+        let mut by_days = Vec::new();
+        let mut until = None;
+        let mut count = None;
+
+        for part in clean.split(';') {
+            let trimmed_part = part.trim();
+            if trimmed_part.is_empty() {
+                continue;
+            }
+
+            let (k, v) = trimmed_part
+                .split_once('=')
+                .ok_or_else(|| format!("Malformed recurrence property (missing '='): {}", trimmed_part))?;
+            let k = k.trim();
+            let v = v.trim();
+            if k.is_empty() || v.is_empty() {
+                return Err(format!("Empty key or value in recurrence property: {}", trimmed_part));
+            }
+
+            match k.to_uppercase().as_str() {
+                "FREQ" => {
+                    let upper = v.to_uppercase();
+                    if matches!(upper.as_str(), "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY") {
+                        freq = Some(upper);
+                    } else {
+                        return Err(format!("Invalid recurrence frequency: {}", v));
+                    }
+                }
+                "INTERVAL" => {
+                    let n = v
+                        .parse::<u32>()
+                        .map_err(|_| format!("Invalid INTERVAL value (expected positive integer): {}", v))?;
+                    if n == 0 {
+                        return Err("INTERVAL must be greater than 0".to_string());
+                    }
+                    interval = n;
+                }
+                "BYDAY" => {
+                    for token in v.split(',') {
+                        let code = token.trim().to_uppercase();
+                        if matches!(code.as_str(), "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU") {
+                            if !by_days.contains(&code) {
+                                by_days.push(code);
+                            }
+                        } else {
+                            return Err(format!("Invalid BYDAY token: {}", token));
+                        }
+                    }
+                }
+                "UNTIL" => {
+                    let clean_v = v.replace(['-', ':'], "");
+                    if clean_v.len() < 8 {
+                        return Err(format!("Invalid UNTIL date format: {}", v));
+                    }
+                    until = Some(v.to_string());
+                }
+                "COUNT" => {
+                    let n = v
+                        .parse::<u32>()
+                        .map_err(|_| format!("Invalid COUNT value (expected positive integer): {}", v))?;
+                    if n == 0 {
+                        return Err("COUNT must be greater than 0".to_string());
+                    }
+                    count = Some(n);
+                }
+                other => {
+                    return Err(format!("Unsupported recurrence property: {}", other));
+                }
+            }
+        }
+        let frequency = freq.ok_or_else(|| "Recurrence rule missing required FREQ property.".to_string())?;
+
+        Ok(RecurrenceRule {
+            frequency,
+            interval,
+            by_days,
+            until,
+            count,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -63,7 +202,8 @@ impl ReferenceContext {
 
 /// Generates a strict GBNF grammar for llama.cpp structured event extraction
 pub fn get_gbnf_grammar() -> &'static str {
-    r#"root ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws opt_string "," ws "\"end_time\":" ws opt_string "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws opt_string "," ws "\"description\":" ws opt_string "}"
+    r#"root ::= "{" ws "\"events\":" ws "[" ws (event ("," ws event)*)? ws "]" ws "}"
+event ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws opt_string "," ws "\"end_time\":" ws opt_string "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws opt_string "," ws "\"description\":" ws opt_string "," ws "\"recurrence_rule\":" ws opt_string "}"
 string ::= "\"" [^"\\]* "\""
 opt_string ::= "null" | string
 boolean ::= "true" | "false"
@@ -75,35 +215,50 @@ ws ::= [ \t\n]*
 pub fn get_json_schema() -> serde_json::Value {
     serde_json::json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "title": "EventDetails",
+        "title": "EventsPayload",
         "type": "object",
         "properties": {
-            "title": {
-                "type": "string",
-                "description": "The concise, clear title or name of the event."
-            },
-            "start_time": {
-                "type": ["string", "null"],
-                "description": "ISO-8601 formatted start date-time including timezone offset (e.g. 2026-09-12T12:00:00-04:00) or YYYY-MM-DD for all-day events."
-            },
-            "end_time": {
-                "type": ["string", "null"],
-                "description": "ISO-8601 formatted end date-time including timezone offset (e.g. 2026-09-12T17:00:00-04:00) or YYYY-MM-DD for all-day events."
-            },
-            "is_all_day": {
-                "type": "boolean",
-                "description": "True if the event spans the entire day or no specific time is mentioned."
-            },
-            "location": {
-                "type": ["string", "null"],
-                "description": "The venue name, physical address, or virtual link (Zoom/Meet)."
-            },
-            "description": {
-                "type": ["string", "null"],
-                "description": "Summary of activities, performers, notes, schedule, or extra details."
+            "events": {
+                "type": "array",
+                "description": "List of extracted calendar events.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The concise, clear title or name of the event or class."
+                        },
+                        "start_time": {
+                            "type": ["string", "null"],
+                            "description": "ISO-8601 formatted start date-time including timezone offset (e.g. 2026-09-08T15:00:00-04:00) or YYYY-MM-DD for all-day events."
+                        },
+                        "end_time": {
+                            "type": ["string", "null"],
+                            "description": "ISO-8601 formatted end date-time including timezone offset (e.g. 2026-09-08T16:15:00-04:00) or YYYY-MM-DD for all-day events."
+                        },
+                        "is_all_day": {
+                            "type": "boolean",
+                            "description": "True if the event spans the entire day or no specific time is mentioned."
+                        },
+                        "location": {
+                            "type": ["string", "null"],
+                            "description": "The venue name, physical address, room number, or virtual link."
+                        },
+                        "description": {
+                            "type": ["string", "null"],
+                            "description": "Summary of activities, instructor/faculty, section code, units, or extra details."
+                        },
+                        "recurrence_rule": {
+                            "type": ["string", "null"],
+                            "description": "RFC 5545 RRULE string for repeating events (e.g. 'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z' or 'FREQ=WEEKLY;BYDAY=TU,TH'). Null if the event does not repeat."
+                        }
+                    },
+                    "required": ["title", "start_time", "end_time", "is_all_day", "location", "description", "recurrence_rule"],
+                    "additionalProperties": false
+                }
             }
         },
-        "required": ["title", "start_time", "end_time", "is_all_day", "location", "description"],
+        "required": ["events"],
         "additionalProperties": false
     })
 }
@@ -124,7 +279,8 @@ pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) ->
 
     format!(
         "Current Reference Time: {} ({})\n\n\
-        Task: Extract the event from the text below into ISO-8601 timestamps relative to the reference time. Output valid JSON matching the EventDetails schema.\n\n\
+        Task: Extract all calendar events from the text below. If there are multiple events (e.g. a class schedule, conference agenda, festival lineup, or recurring sessions), extract each as a distinct event item in the 'events' array. For repeating events (such as weekly classes meeting on certain days), populate 'recurrence_rule' with an RFC 5545 RRULE string (e.g. 'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z'). Output ISO-8601 timestamps relative to the reference time.\n\
+        Output valid JSON matching the schema with an 'events' array.\n\n\
         --- Extracted Text ---\n\
         {}\n\
         ----------------------\n",
@@ -132,8 +288,583 @@ pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) ->
     )
 }
 
-/// Deterministic fallback parser implementing heuristic & regex extraction
+/// Deterministic fallback parser implementing multi-event schedule, agenda, and single-event parsing
+pub fn parse_events_deterministic(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    // 1. Try class schedule table parsing
+    let schedule_events = parse_schedule_table_events(ocr_text, context);
+    if schedule_events.len() >= 2 {
+        return schedule_events;
+    }
+
+    // 2. Try generic agenda / multi-event line parsing
+    let agenda_events = parse_agenda_events(ocr_text, context);
+    if agenda_events.len() >= 2 {
+        return agenda_events;
+    }
+
+    // 3. Fallback to single event parsing
+    vec![parse_single_event_deterministic(ocr_text, context)]
+}
+
+/// Compatibility wrapper returning the primary or first extracted event
 pub fn parse_event_deterministic(ocr_text: &str, context: &ReferenceContext) -> EventDetails {
+    let events = parse_events_deterministic(ocr_text, context);
+    events.into_iter().next().unwrap_or_else(|| parse_single_event_deterministic(ocr_text, context))
+}
+
+/// Parses weekday abbreviations from strings like "Mo, We" into RFC 5545 BYDAY tokens
+pub fn parse_weekdays_to_byday(days_str: &str) -> Vec<String> {
+    let mut bydays = Vec::new();
+    let parts: Vec<&str> = days_str
+        .split(|c: char| c == ',' || c == '/' || c == '&' || c == ' ' || c == ';' || c == '+')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    for p in parts {
+        let lower = p.to_lowercase();
+        let code = match lower.as_str() {
+            "mo" | "mon" | "monday" => Some("MO"),
+            "tu" | "tue" | "tues" | "tuesday" => Some("TU"),
+            "we" | "wed" | "wednesday" => Some("WE"),
+            "th" | "thu" | "thur" | "thurs" | "thursday" => Some("TH"),
+            "fr" | "fri" | "friday" => Some("FR"),
+            "sa" | "sat" | "saturday" => Some("SA"),
+            "su" | "sun" | "sunday" => Some("SU"),
+            _ => None,
+        };
+        if let Some(c) = code {
+            if !bydays.contains(&c.to_string()) {
+                bydays.push(c.to_string());
+            }
+        }
+    }
+    bydays
+}
+
+/// Extracts academic term end date for UNTIL recurrence rule
+pub fn extract_term_until_date(text: &str, ref_dt: DateTime<FixedOffset>) -> String {
+    let lower = text.to_lowercase();
+    let year_re = Regex::new(r"\b(20\d{2})\b").unwrap();
+    let year = if let Some(caps) = year_re.captures(text) {
+        caps.get(1).unwrap().as_str().parse::<i32>().unwrap_or(ref_dt.year())
+    } else {
+        ref_dt.year()
+    };
+
+    if lower.contains("fall") || lower.contains("autumn") {
+        format!("{:04}1218T235959Z", year)
+    } else if lower.contains("spring") {
+        format!("{:04}0515T235959Z", year)
+    } else if lower.contains("summer") {
+        format!("{:04}0815T235959Z", year)
+    } else if lower.contains("winter") {
+        format!("{:04}0315T235959Z", year)
+    } else {
+        let month = ref_dt.month();
+        if month >= 8 {
+            format!("{:04}1218T235959Z", year)
+        } else if month <= 5 {
+            format!("{:04}0515T235959Z", year)
+        } else {
+            format!("{:04}0815T235959Z", year)
+        }
+    }
+}
+
+/// Parses multi-event academic / class schedule tables
+pub fn parse_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    let row_events = parse_row_schedule_table_events(ocr_text, context);
+    if row_events.len() >= 2 {
+        return row_events;
+    }
+    parse_columnar_schedule_table_events(ocr_text, context)
+}
+
+/// Parses row-aligned class schedule tables
+fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    let ref_dt = context.get_reference_datetime();
+    let offset = context.get_fixed_offset();
+    let course_code_re = Regex::new(r"\b([A-Z]{2,6}\s+\d{3,4}(?:-\d{2,3})?(?:\s*\(\d+\))?)\b").unwrap();
+    let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
+    let time_range_re = Regex::new(r"(?i)\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b").unwrap();
+
+    let blacklist_prefixes = ["ROOM", "HALL", "DATE", "PAGE", "TERM", "YEAR", "BLDG", "STEP", "UNIT", "SUMMIT"];
+    let matches: Vec<_> = course_code_re
+        .find_iter(ocr_text)
+        .filter(|m| {
+            let first_word = m.as_str().split_whitespace().next().unwrap_or("").to_uppercase();
+            !blacklist_prefixes.contains(&first_word.as_str())
+        })
+        .collect();
+    let mut events = Vec::new();
+
+    for (i, m) in matches.iter().enumerate() {
+        let course_code = m.as_str().trim();
+        let start_pos = m.end();
+        let end_pos = if i + 1 < matches.len() {
+            matches[i + 1].start()
+        } else {
+            ocr_text.len()
+        };
+
+        let block_raw = &ocr_text[start_pos..end_pos];
+        let block_clean = block_raw.replace('\n', " ");
+
+        let time_match = time_range_re.find(&block_clean);
+        let days_match = day_pattern_re.find(&block_clean);
+
+        if let Some(tm) = time_match {
+            let time_str = tm.as_str();
+            let times_opt = extract_times(time_str);
+
+            let (first_day_opt, all_days_str, bydays) = if let Some(dm) = days_match {
+                let days_str = dm.as_str().trim();
+                let first_day = days_str.split(',').next().map(|s| s.trim()).unwrap_or(days_str);
+                let parsed_bydays = parse_weekdays_to_byday(days_str);
+                (Some(first_day), Some(days_str.to_string()), parsed_bydays)
+            } else {
+                (None, None, Vec::new())
+            };
+
+            let (start_time_iso, end_time_iso, is_all_day) = if let Some((start_time, end_time_opt)) = times_opt {
+                let target_date = if let Some(day_str) = first_day_opt {
+                    get_weekday_date(day_str, ref_dt).unwrap_or_else(|| ref_dt.date_naive())
+                } else {
+                    ref_dt.date_naive()
+                };
+
+                let start_dt = offset.from_local_datetime(&target_date.and_time(start_time)).unwrap();
+                let end_dt_str = if let Some(end_time) = end_time_opt {
+                    let end_date = if end_time < start_time {
+                        target_date + Duration::days(1)
+                    } else {
+                        target_date
+                    };
+                    let end_dt = offset.from_local_datetime(&end_date.and_time(end_time)).unwrap();
+                    Some(end_dt.to_rfc3339())
+                } else {
+                    let end_dt = start_dt + Duration::hours(1);
+                    Some(end_dt.to_rfc3339())
+                };
+
+                (Some(start_dt.to_rfc3339()), end_dt_str, false)
+            } else {
+                (None, None, true)
+            };
+
+            let pre_time_text = if let Some(dm) = days_match {
+                if dm.start() < block_clean.len() {
+                    &block_clean[..dm.start()]
+                } else {
+                    &block_clean[..tm.start()]
+                }
+            } else {
+                &block_clean[..tm.start()]
+            };
+
+            let course_name = clean_course_name(pre_time_text);
+            let full_title = if !course_name.is_empty() {
+                format!("{} {}", course_code, course_name)
+            } else {
+                course_code.to_string()
+            };
+
+            let post_time_text = &block_clean[tm.end()..];
+            let (location, faculty_notes) = extract_schedule_post_time_details(post_time_text);
+
+            let mut desc_parts = Vec::new();
+            if let Some(days) = all_days_str {
+                desc_parts.push(format!("Days: {}", days));
+            }
+            if let Some(notes) = faculty_notes {
+                desc_parts.push(notes);
+            }
+            let description = if desc_parts.is_empty() {
+                None
+            } else {
+                Some(desc_parts.join(" | "))
+            };
+
+            let recurrence_rule = if !bydays.is_empty() {
+                Some(RecurrenceRule::new_weekly(bydays, None).to_rrule_string())
+            } else {
+                None
+            };
+
+            events.push(EventDetails {
+                title: full_title,
+                start_time: start_time_iso,
+                end_time: end_time_iso,
+                is_all_day,
+                location,
+                description,
+                recurrence_rule,
+                confidence: 0.95,
+                source: "deterministic_schedule".to_string(),
+            });
+        }
+    }
+
+    events
+}
+
+/// Extracts descriptions from a columnar OCR text block between course codes and time slots
+fn extract_columnar_descriptions(lines: &[&str], last_code_idx: usize, first_time_idx: usize, target_count: usize) -> Vec<String> {
+    if first_time_idx <= last_code_idx + 1 || target_count == 0 {
+        return Vec::new();
+    }
+    let candidate_slice = &lines[last_code_idx + 1..first_time_idx];
+    let header_re = Regex::new(r"(?i)^(Description|Class\s+Description|Course\s+Name|Title)$").unwrap();
+    let raw_desc_lines: Vec<&str> = candidate_slice
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !header_re.is_match(l))
+        .collect();
+
+    if raw_desc_lines.is_empty() {
+        return Vec::new();
+    }
+
+    if raw_desc_lines.len() == target_count {
+        return raw_desc_lines.into_iter().map(|s| s.to_string()).collect();
+    }
+
+    // Merge multi-line descriptions (lines ending with connectors, unclosed parentheses, or continuation keywords)
+    let mut merged: Vec<String> = Vec::new();
+    for l in raw_desc_lines {
+        let is_continuation = merged.last().map_or(false, |last| {
+            let last_trimmed = last.trim();
+            last_trimmed.ends_with('-')
+                || last_trimmed.ends_with('&')
+                || last_trimmed.ends_with(',')
+                || last_trimmed.ends_with('(')
+                || (!last_trimmed.ends_with(')') && (l.starts_with("Images") || l.starts_with("Text") || l.starts_with('&') || l.starts_with('(') || l.starts_with("and ") || l.starts_with("with ")))
+        });
+
+        if is_continuation && !merged.is_empty() {
+            let last = merged.last_mut().unwrap();
+            last.push(' ');
+            last.push_str(l);
+        } else {
+            merged.push(l.to_string());
+        }
+    }
+
+    if merged.len() == target_count {
+        return merged;
+    }
+
+    let mut result = Vec::new();
+    for i in 0..target_count {
+        if i < merged.len() {
+            result.push(merged[i].clone());
+        } else {
+            result.push(String::new());
+        }
+    }
+    result
+}
+
+/// Parses columnar-oriented schedule tables where columns are output sequentially
+fn parse_columnar_schedule_table_events(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    let ref_dt = context.get_reference_datetime();
+    let offset = context.get_fixed_offset();
+    let course_code_re = Regex::new(r"\b([A-Z]{2,6}\s+\d{3,4}(?:-\d{2,3})?(?:\s*\(\d+\))?)\b").unwrap();
+    let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
+    let time_range_re = Regex::new(r"(?i)\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b").unwrap();
+
+    let blacklist_prefixes = ["ROOM", "HALL", "DATE", "PAGE", "TERM", "YEAR", "BLDG", "STEP", "UNIT", "SUMMIT"];
+    let course_codes: Vec<String> = course_code_re
+        .find_iter(ocr_text)
+        .filter(|m| {
+            let first_word = m.as_str().split_whitespace().next().unwrap_or("").to_uppercase();
+            !blacklist_prefixes.contains(&first_word.as_str())
+        })
+        .map(|m| m.as_str().trim().to_string())
+        .collect();
+
+    let lines: Vec<&str> = ocr_text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let mut time_slots: Vec<(String, Option<String>, Option<String>)> = Vec::new(); // (time_str, days_str, location)
+
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(tm) = time_range_re.find(line) {
+            let time_str = tm.as_str().to_string();
+            let dm_opt = day_pattern_re.find(line).map(|m| m.as_str().to_string());
+            let next_line = if idx + 1 < lines.len() && !time_range_re.is_match(lines[idx + 1]) && !course_code_re.is_match(lines[idx + 1]) {
+                Some(lines[idx + 1].trim().to_string())
+            } else {
+                None
+            };
+            time_slots.push((time_str, dm_opt, next_line));
+        }
+    }
+
+    if course_codes.len() >= 2 && time_slots.len() == course_codes.len() {
+        let last_code_line_idx = lines.iter().rposition(|l| course_code_re.is_match(l)).unwrap_or(0);
+        let first_time_line_idx = lines.iter().position(|l| time_range_re.is_match(l)).unwrap_or(lines.len());
+        let descriptions = extract_columnar_descriptions(&lines, last_code_line_idx, first_time_line_idx, course_codes.len());
+
+        let mut events = Vec::new();
+        for (i, code) in course_codes.iter().enumerate() {
+            let (time_str, days_opt, next_line_opt) = &time_slots[i];
+            let times_opt = extract_times(time_str);
+            let first_day_opt = days_opt.as_ref().and_then(|d| d.split(',').next().map(|s| s.trim()));
+            let bydays = days_opt.as_ref().map(|d| parse_weekdays_to_byday(d)).unwrap_or_default();
+
+            let (start_time_iso, end_time_iso, is_all_day) = if let Some((start_time, end_time_opt)) = times_opt {
+                let target_date = if let Some(day_str) = first_day_opt {
+                    get_weekday_date(day_str, ref_dt).unwrap_or_else(|| ref_dt.date_naive())
+                } else {
+                    ref_dt.date_naive()
+                };
+
+                let start_dt = offset.from_local_datetime(&target_date.and_time(start_time)).unwrap();
+                let end_dt_str = if let Some(end_time) = end_time_opt {
+                    let end_date = if end_time < start_time {
+                        target_date + Duration::days(1)
+                    } else {
+                        target_date
+                    };
+                    let end_dt = offset.from_local_datetime(&end_date.and_time(end_time)).unwrap();
+                    Some(end_dt.to_rfc3339())
+                } else {
+                    let end_dt = start_dt + Duration::hours(1);
+                    Some(end_dt.to_rfc3339())
+                };
+
+                (Some(start_dt.to_rfc3339()), end_dt_str, false)
+            } else {
+                (None, None, true)
+            };
+
+            let desc_str = if i < descriptions.len() { &descriptions[i] } else { "" };
+            let full_title = if !desc_str.is_empty() {
+                format!("{} {}", code, desc_str)
+            } else {
+                code.clone()
+            };
+
+            let recurrence_rule = if !bydays.is_empty() {
+                Some(RecurrenceRule::new_weekly(bydays, None).to_rrule_string())
+            } else {
+                None
+            };
+
+            let description = days_opt.as_ref().map(|d| format!("Days: {}", d));
+
+            events.push(EventDetails {
+                title: full_title,
+                start_time: start_time_iso,
+                end_time: end_time_iso,
+                is_all_day,
+                location: next_line_opt.clone(),
+                description,
+                recurrence_rule,
+                confidence: 0.90,
+                source: "deterministic_schedule_columnar".to_string(),
+            });
+        }
+        return events;
+    }
+
+    Vec::new()
+}
+
+/// Helper to clean extracted course descriptions from schedule blocks
+fn clean_course_name(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    let header_prefixes = ["Class Description", "Description", "Course Name", "Title"];
+    for hp in header_prefixes {
+        if s.starts_with(hp) {
+            s = s[hp.len()..].trim().to_string();
+        }
+    }
+    s = s.trim_matches(|c: char| c == '-' || c == ':' || c == '|' || c == '(' || c == ')' || c == ',' || c == '\n').trim().to_string();
+    s = s.replace("  ", " ");
+    s
+}
+
+/// Helper to separate location from instructor and units
+fn extract_schedule_post_time_details(post_text: &str) -> (Option<String>, Option<String>) {
+    let text = post_text.trim();
+    if text.is_empty() {
+        return (None, None);
+    }
+
+    let faculty_re = Regex::new(r"(?i)\b([A-Z]\.\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b").unwrap();
+    let units_re = Regex::new(r"\b(\d+\.\d{2})\b").unwrap();
+
+    let faculty_match = faculty_re.find(text);
+    let units_match = units_re.find(text);
+
+    let location = if let Some(fm) = faculty_match {
+        let loc_str = text[..fm.start()].trim().trim_matches(|c: char| c == ',' || c == '|' || c == '-').trim();
+        if !loc_str.is_empty() {
+            Some(loc_str.to_string())
+        } else {
+            None
+        }
+    } else {
+        let loc_str = text.trim().trim_matches(|c: char| c == ',' || c == '|' || c == '-').trim();
+        if !loc_str.is_empty() {
+            Some(loc_str.to_string())
+        } else {
+            None
+        }
+    };
+
+    let mut notes_parts = Vec::new();
+    if let Some(fm) = faculty_match {
+        notes_parts.push(format!("Faculty: {}", fm.as_str().trim()));
+    }
+    if let Some(um) = units_match {
+        notes_parts.push(format!("Units: {}", um.as_str().trim()));
+    }
+
+    let notes = if notes_parts.is_empty() {
+        None
+    } else {
+        Some(notes_parts.join(", "))
+    };
+
+    (location, notes)
+}
+
+/// Calculates target weekday date for recurring schedule items
+fn get_weekday_date(day_abbr: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> {
+    let lower = day_abbr.trim().to_lowercase();
+    let target_weekday = match lower.as_str() {
+        "mo" | "mon" | "monday" => chrono::Weekday::Mon,
+        "tu" | "tue" | "tues" | "tuesday" => chrono::Weekday::Tue,
+        "we" | "wed" | "wednesday" => chrono::Weekday::Wed,
+        "th" | "thu" | "thur" | "thurs" | "thursday" => chrono::Weekday::Thu,
+        "fr" | "fri" | "friday" => chrono::Weekday::Fri,
+        "sa" | "sat" | "saturday" => chrono::Weekday::Sat,
+        "su" | "sun" | "sunday" => chrono::Weekday::Sun,
+        _ => return None,
+    };
+
+    let ref_date = ref_dt.date_naive();
+    let current_weekday = ref_date.weekday();
+    let days_from_monday = current_weekday.num_days_from_monday() as i64;
+    let monday_date = ref_date - Duration::days(days_from_monday);
+    let target_offset = target_weekday.num_days_from_monday() as i64;
+    let mut target_date = monday_date + Duration::days(target_offset);
+    
+    // If target date is before ref_date by more than 1 day in the past week, advance to next week
+    if target_date < ref_date - Duration::days(1) {
+        target_date = target_date + Duration::days(7);
+    }
+
+    Some(target_date)
+}
+
+/// Parses agenda / multi-event lines with distinct time slots
+pub fn parse_agenda_events(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    let ref_dt = context.get_reference_datetime();
+    let offset = context.get_fixed_offset();
+    let mut current_date = extract_date(ocr_text, ref_dt).unwrap_or_else(|| ref_dt.date_naive());
+
+    let time_range_re = Regex::new(r"(?i)\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b").unwrap();
+    let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
+    let lines: Vec<&str> = ocr_text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+    let mut events = Vec::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        // If the line contains a date heading, update the current tracking date
+        if let Some(d) = extract_date(line, ref_dt) {
+            current_date = d;
+        }
+
+        if let Some(caps) = time_range_re.captures(line) {
+            let time_str = caps.get(0).unwrap().as_str();
+            let times_opt = extract_times(time_str);
+
+            if let Some((start_time, end_time_opt)) = times_opt {
+                let days_opt = day_pattern_re.find(line).map(|m| m.as_str().to_string());
+                let target_date = if let Some(line_date) = extract_date(line, ref_dt) {
+                    line_date
+                } else if let Some(d) = &days_opt {
+                    let first_d = d.split(',').next().map(|s| s.trim()).unwrap_or(d.as_str());
+                    get_weekday_date(first_d, ref_dt).unwrap_or(current_date)
+                } else {
+                    current_date
+                };
+                let start_dt = offset.from_local_datetime(&target_date.and_time(start_time)).unwrap();
+                let end_dt_str = if let Some(end_time) = end_time_opt {
+                    let end_date = if end_time < start_time {
+                        target_date + Duration::days(1)
+                    } else {
+                        target_date
+                    };
+                    let end_dt = offset.from_local_datetime(&end_date.and_time(end_time)).unwrap();
+                    Some(end_dt.to_rfc3339())
+                } else {
+                    let end_dt = start_dt + Duration::hours(1);
+                    Some(end_dt.to_rfc3339())
+                };
+
+                // Remove time string from line to extract title and location
+                let mut rest = line.replace(time_str, "");
+                if let Some(d) = &days_opt {
+                    rest = rest.replace(d, "");
+                }
+                let cleaned_rest = rest.trim().trim_matches(|c: char| c == ':' || c == '-' || c == '|' || c == '*' || c == ',').trim();
+
+                // Extract location if in parentheses e.g. "(Room 204)" or "(Main Auditorium)"
+                let paren_re = Regex::new(r"\(([^)]+)\)").unwrap();
+                let (mut title, location) = if let Some(p_cap) = paren_re.captures(cleaned_rest) {
+                    let loc = p_cap.get(1).unwrap().as_str().trim().to_string();
+                    let t = paren_re.replace(cleaned_rest, "").trim().to_string();
+                    (t, Some(loc))
+                } else {
+                    (cleaned_rest.to_string(), None)
+                };
+
+                let is_weekday_only = title.is_empty() || title.split(',').all(|w| {
+                    let tw = w.trim().to_lowercase();
+                    matches!(tw.as_str(), "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su" | "mon" | "tue" | "tues" | "wed" | "thu" | "thur" | "thurs" | "fri" | "sat" | "sun" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday")
+                });
+
+                if is_weekday_only && idx > 0 && !time_range_re.is_match(lines[idx - 1]) {
+                    title = lines[idx - 1].trim().to_string();
+                }
+                let bydays = days_opt.as_ref().map(|d| parse_weekdays_to_byday(d)).unwrap_or_default();
+                let line_lower = line.to_lowercase();
+                let has_explicit_repeat = line_lower.contains("every")
+                    || line_lower.contains("weekly")
+                    || line_lower.contains("repeats")
+                    || line_lower.contains("recurring")
+                    || bydays.len() >= 2;
+                let recurrence_rule = if has_explicit_repeat && !bydays.is_empty() {
+                    Some(RecurrenceRule::new_weekly(bydays, None).to_rrule_string())
+                } else {
+                    None
+                };
+                if !title.is_empty() {
+                    events.push(EventDetails {
+                        title,
+                        start_time: Some(start_dt.to_rfc3339()),
+                        end_time: end_dt_str,
+                        is_all_day: false,
+                        location,
+                        description: None,
+                        recurrence_rule,
+                        confidence: 0.90,
+                        source: "deterministic_agenda".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    events
+}
+
+/// Core single-event deterministic extraction
+pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceContext) -> EventDetails {
     let ref_dt = context.get_reference_datetime();
     let offset = context.get_fixed_offset();
 
@@ -230,6 +961,7 @@ pub fn parse_event_deterministic(ocr_text: &str, context: &ReferenceContext) -> 
         is_all_day,
         location,
         description,
+        recurrence_rule: None,
         confidence,
         source: "deterministic".to_string(),
     }
@@ -872,11 +1604,12 @@ MIT Stata Center, Room 32-123
     fn test_gbnf_grammar_and_json_schema() {
         let grammar = get_gbnf_grammar();
         assert!(grammar.contains("root ::="));
+        assert!(grammar.contains(r#"\"events\":"#));
         assert!(grammar.contains(r#"\"title\":"#));
         assert!(grammar.contains(r#"\"start_time\":"#));
         let schema = get_json_schema();
-        assert_eq!(schema["title"], "EventDetails");
-        assert!(schema["properties"]["start_time"].is_object());
+        assert_eq!(schema["title"], "EventsPayload");
+        assert!(schema["properties"]["events"].is_object());
     }
 
     #[test]
@@ -943,5 +1676,250 @@ MIT Stata Center, Room 32-123
         let text4 = "Team BBQ Celebration\nAugust 8, 2026\n1:00 PM - 5:00 PM\nCity Park";
         let event4 = parse_event_deterministic(text4, &ctx);
         assert_eq!(event4.title, "Team BBQ Celebration");
+    }
+
+    #[test]
+    fn test_parse_fall_2026_class_schedule_6_events() {
+        let ocr_text = r#"My Fall Term 2026 Class Schedule
+Class Description Days, Times, & Locations Faculty Units Status
+CEE 0154-03 (80513) Principles Epidemiology (Lecture) Mo, We 3:00PM - 4:15PM Anderson Wing TTC, Room 306 L. Abrams 3.00
+CS 0150-09 (84779) Special Topics - Analysis Mthds Images, Text & (Lecture) Fr 2:00PM - 4:30PM Online J. Skripchuk 3.00
+CSHD 0166-01 (82454) Children's Play (Lecture) Th 1:30PM - 4:00PM Eliot-Pearson, Room 157 W. Scarlett 3.00
+CSHD 0167-01 (80739) Children & Media (Lecture) Fr 9:00AM - 11:30AM Eaton Hall, 201 J. Dobrow 3.00
+UEP 0254-01 (81300) Quantitative Reasoning (Lecture) Tu, Th 9:00AM - 10:15AM Joyce Cummings Center, 302 S. Shamsuddin 3.00
+UEP 0262-01 (82571) Solidarity Economy Movements (Seminar) Tu 12:00PM - 2:30PM Bromfield-Pearson, Room 006 P. Loh 3.00"#;
+
+        let ctx = sample_reference_context(); // Reference is Sunday 2026-09-06
+        let events = parse_events_deterministic(ocr_text, &ctx);
+
+        assert_eq!(events.len(), 6, "Expected exactly 6 parsed events from class schedule, got {}", events.len());
+
+        // 1. CEE 0154-03
+        assert!(events[0].title.contains("CEE 0154-03") && events[0].title.contains("Principles Epidemiology"));
+        assert!(events[0].start_time.as_ref().unwrap().starts_with("2026-09-07T15:00:00"));
+        assert!(events[0].end_time.as_ref().unwrap().starts_with("2026-09-07T16:15:00"));
+        assert!(events[0].location.as_deref().unwrap().contains("Anderson Wing TTC"));
+        assert!(events[0].description.as_deref().unwrap().contains("L. Abrams"));
+        assert_eq!(events[0].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO,WE"));
+
+        // 2. CS 0150-09
+        assert!(events[1].title.contains("CS 0150-09") && events[1].title.contains("Special Topics"));
+        assert!(events[1].start_time.as_ref().unwrap().starts_with("2026-09-11T14:00:00"));
+        assert!(events[1].end_time.as_ref().unwrap().starts_with("2026-09-11T16:30:00"));
+        assert_eq!(events[1].location.as_deref(), Some("Online"));
+        assert!(events[1].description.as_deref().unwrap().contains("J. Skripchuk"));
+        assert_eq!(events[1].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=FR"));
+
+        // 3. CSHD 0166-01
+        assert!(events[2].title.contains("CSHD 0166-01") && events[2].title.contains("Children's Play"));
+        assert!(events[2].start_time.as_ref().unwrap().starts_with("2026-09-10T13:30:00"));
+        assert!(events[2].end_time.as_ref().unwrap().starts_with("2026-09-10T16:00:00"));
+        assert!(events[2].location.as_deref().unwrap().contains("Eliot-Pearson"));
+        assert!(events[2].description.as_deref().unwrap().contains("W. Scarlett"));
+        assert_eq!(events[2].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TH"));
+
+        // 4. CSHD 0167-01
+        assert!(events[3].title.contains("CSHD 0167-01") && events[3].title.contains("Children & Media"));
+        assert!(events[3].start_time.as_ref().unwrap().starts_with("2026-09-11T09:00:00"));
+        assert!(events[3].end_time.as_ref().unwrap().starts_with("2026-09-11T11:30:00"));
+        assert!(events[3].location.as_deref().unwrap().contains("Eaton Hall"));
+        assert!(events[3].description.as_deref().unwrap().contains("J. Dobrow"));
+        assert_eq!(events[3].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=FR"));
+
+        // 5. UEP 0254-01
+        assert!(events[4].title.contains("UEP 0254-01") && events[4].title.contains("Quantitative Reasoning"));
+        assert!(events[4].start_time.as_ref().unwrap().starts_with("2026-09-08T09:00:00"));
+        assert!(events[4].end_time.as_ref().unwrap().starts_with("2026-09-08T10:15:00"));
+        assert!(events[4].location.as_deref().unwrap().contains("Joyce Cummings Center"));
+        assert!(events[4].description.as_deref().unwrap().contains("S. Shamsuddin"));
+        assert_eq!(events[4].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU,TH"));
+
+        // 6. UEP 0262-01
+        assert!(events[5].title.contains("UEP 0262-01") && events[5].title.contains("Solidarity Economy"));
+        assert!(events[5].start_time.as_ref().unwrap().starts_with("2026-09-08T12:00:00"));
+        assert!(events[5].end_time.as_ref().unwrap().starts_with("2026-09-08T14:30:00"));
+        assert!(events[5].location.as_deref().unwrap().contains("Bromfield-Pearson"));
+        assert!(events[5].description.as_deref().unwrap().contains("P. Loh"));
+        assert_eq!(events[5].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+    }
+
+    #[test]
+    fn test_parse_columnar_fall_2026_class_schedule_all_titles() {
+        let columnar_ocr_text = r#"My Fall Term 2026 Class Schedule
+Class
+CEE 0154-03 (80513)
+CS 0150-09 (84779)
+CSHD 0166-01 (82454)
+CSHD 0167-01 (80739)
+UEP 0254-01 (81300)
+UEP 0262-01 (82571)
+Description
+Principles Epidemiology (Lecture)
+Special Topics - Analysis Mthds Images, Text & (Lecture)
+Children's Play (Lecture)
+Children & Media (Lecture)
+Quantitative Reasoning (Lecture)
+Solidarity Economy Movements (Seminar)
+Days, Times, & Locations
+Mo, We 3:00PM - 4:15PM
+Anderson Wing TTC, Room 306
+Fr 2:00PM - 4:30PM
+Online
+Th 1:30PM - 4:00PM
+Eliot-Pearson, Room 157
+Fr 9:00AM - 11:30AM
+Eaton Hall, 201
+Tu, Th 9:00AM - 10:15AM
+Joyce Cummings Center, 302
+Tu 12:00PM - 2:30PM
+Bromfield-Pearson, Room 006
+Faculty
+L. Abrams
+J. Skripchuk
+W. Scarlett
+J. Dobrow
+S. Shamsuddin
+P. Loh
+Units
+3.00
+3.00
+3.00
+3.00
+3.00
+3.00
+Status"#;
+
+        let ctx = sample_reference_context();
+        let events = parse_events_deterministic(columnar_ocr_text, &ctx);
+
+        assert_eq!(events.len(), 6, "Expected exactly 6 parsed events from columnar schedule, got {}", events.len());
+
+        assert!(events[0].title.contains("CEE 0154-03") && events[0].title.contains("Principles Epidemiology"));
+        assert_eq!(events[0].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO,WE"));
+
+        assert!(events[1].title.contains("CS 0150-09") && events[1].title.contains("Special Topics"));
+        assert_eq!(events[1].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=FR"));
+
+        assert!(events[2].title.contains("CSHD 0166-01") && events[2].title.contains("Children's Play"));
+        assert_eq!(events[2].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TH"));
+
+        assert!(events[3].title.contains("CSHD 0167-01") && events[3].title.contains("Children & Media"));
+        assert_eq!(events[3].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=FR"));
+
+        assert!(events[4].title.contains("UEP 0254-01") && events[4].title.contains("Quantitative Reasoning"));
+        assert_eq!(events[4].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU,TH"));
+
+        assert!(events[5].title.contains("UEP 0262-01") && events[5].title.contains("Solidarity Economy Movements"));
+        assert_eq!(events[5].recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+    }
+
+    #[test]
+    fn test_recurrence_rule_parsing_and_validation() {
+        let valid = "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z";
+        let parsed = RecurrenceRule::parse_rrule(valid).expect("Should parse valid rule");
+        assert_eq!(parsed.frequency, "WEEKLY");
+        assert_eq!(parsed.by_days, vec!["MO", "WE"]);
+        assert_eq!(parsed.until.as_deref(), Some("20261218T235959Z"));
+        assert_eq!(parsed.to_rrule_string(), "FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z");
+
+        // Test missing FREQ
+        let invalid_no_freq = "BYDAY=MO,WE";
+        assert!(RecurrenceRule::parse_rrule(invalid_no_freq).is_err());
+
+        // Test invalid frequency
+        let invalid_freq = "FREQ=HOURLY;BYDAY=MO";
+        assert!(RecurrenceRule::parse_rrule(invalid_freq).is_err());
+
+        // Test invalid BYDAY
+        let invalid_byday = "FREQ=WEEKLY;BYDAY=INVALID";
+        assert!(RecurrenceRule::parse_rrule(invalid_byday).is_err());
+    }
+
+    #[test]
+    fn test_parse_conference_agenda_multiple_events() {
+        let text = r#"AI & Cloud Summit 2026
+Friday, October 16, 2026
+9:00 AM - 10:00 AM: Keynote Speech (Main Auditorium)
+10:30 AM - 12:00 PM: Machine Learning Workshop (Room 204)
+1:00 PM - 2:30 PM: WebAssembly Panel (Hall B)
+3:00 PM - 4:30 PM: Networking & Drinks (Rooftop Lounge)"#;
+        let ctx = sample_reference_context();
+        let events = parse_events_deterministic(text, &ctx);
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].title, "Keynote Speech");
+        assert_eq!(events[0].start_time.as_deref(), Some("2026-10-16T09:00:00-04:00"));
+        assert_eq!(events[0].end_time.as_deref(), Some("2026-10-16T10:00:00-04:00"));
+        assert_eq!(events[0].location.as_deref(), Some("Main Auditorium"));
+        assert!(events[0].recurrence_rule.is_none(), "One-off conference event should not have recurrence");
+
+        assert_eq!(events[1].title, "Machine Learning Workshop");
+        assert_eq!(events[1].location.as_deref(), Some("Room 204"));
+        assert!(events[1].recurrence_rule.is_none());
+
+        assert_eq!(events[2].title, "WebAssembly Panel");
+        assert_eq!(events[2].location.as_deref(), Some("Hall B"));
+        assert!(events[2].recurrence_rule.is_none());
+
+        assert_eq!(events[3].title, "Networking & Drinks");
+        assert_eq!(events[3].location.as_deref(), Some("Rooftop Lounge"));
+        assert!(events[3].recurrence_rule.is_none());
+    }
+    #[test]
+    fn test_parse_multi_day_conference_non_recurring() {
+        let text = r#"Developer Summit 2026
+Thursday, October 15, 2026
+9:00 AM - 10:30 AM: Opening Keynote (Auditorium)
+2:00 PM - 4:00 PM: Rust Deep Dive (Room 101)
+Friday, October 16, 2026
+10:00 AM - 11:30 AM: Closing Remarks (Auditorium)"#;
+
+        let ctx = sample_reference_context();
+        let events = parse_events_deterministic(text, &ctx);
+
+        assert_eq!(events.len(), 3);
+
+        // Day 1: Thursday, Oct 15
+        assert_eq!(events[0].title, "Opening Keynote");
+        assert!(events[0].start_time.as_ref().unwrap().starts_with("2026-10-15T09:00:00"));
+        assert!(events[0].end_time.as_ref().unwrap().starts_with("2026-10-15T10:30:00"));
+        assert!(events[0].recurrence_rule.is_none());
+
+        assert_eq!(events[1].title, "Rust Deep Dive");
+        assert!(events[1].start_time.as_ref().unwrap().starts_with("2026-10-15T14:00:00"));
+        assert!(events[1].end_time.as_ref().unwrap().starts_with("2026-10-15T16:00:00"));
+        assert!(events[1].recurrence_rule.is_none());
+
+        // Day 2: Friday, Oct 16
+        assert_eq!(events[2].title, "Closing Remarks");
+        assert!(events[2].start_time.as_ref().unwrap().starts_with("2026-10-16T10:00:00"));
+        assert!(events[2].end_time.as_ref().unwrap().starts_with("2026-10-16T11:30:00"));
+        assert!(events[2].recurrence_rule.is_none());
+    }
+    #[test]
+    fn test_parse_multi_line_class_schedule() {
+        let text = r#"My Fall Term 2026 Class Schedule
+Class Description Days, Times, & Locations Faculty Units Status
+CEE 0154-03 (80513)
+Principles Epidemiology (Lecture)
+Mo, We 3:00PM - 4:15PM
+Anderson Wing TTC, Room 306
+L. Abrams
+3.00
+CS 0150-09 (84779)
+Special Topics - Analysis Mthds Images, Text & (Lecture)
+Fr 2:00PM - 4:30PM
+Online
+J. Skripchuk
+3.00"#;
+
+        let ctx = sample_reference_context();
+        let events = parse_events_deterministic(text, &ctx);
+
+        assert_eq!(events.len(), 2);
+        assert!(events[0].title.contains("CEE 0154-03"));
+        assert!(events[0].location.as_deref().unwrap().contains("Anderson Wing"));
+        assert!(events[1].title.contains("CS 0150-09"));
+        assert_eq!(events[1].location.as_deref(), Some("Online"));
     }
 }

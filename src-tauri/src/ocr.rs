@@ -21,6 +21,139 @@ pub struct OcrResult {
     pub lines: Vec<OcrLine>,
 }
 
+/// Reconstructs line text by clustering 2D bounding boxes into horizontal rows.
+/// In Apple Vision / normalized image coordinates, y=0.0 is bottom and y=1.0 is top.
+pub fn reconstruct_spatial_lines(lines: &[OcrLine]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let has_boxes = lines.iter().any(|l| l.bounding_box.is_some());
+    if !has_boxes {
+        return lines
+            .iter()
+            .map(|l| l.text.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    #[derive(Clone)]
+    struct LineItem<'a> {
+        text: &'a str,
+        min_x: f64,
+        min_y: f64,
+        max_y: f64,
+        center_y: f64,
+        height: f64,
+    }
+    let mut items: Vec<LineItem> = Vec::new();
+    let mut unboxed_items: Vec<&str> = Vec::new();
+    for l in lines {
+        let t = l.text.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(bb) = &l.bounding_box {
+            let height = bb.height.max(0.005);
+            let min_y = bb.y;
+            let max_y = bb.y + height;
+            let center_y = min_y + (height / 2.0);
+            let min_x = bb.x;
+
+            items.push(LineItem {
+                text: t,
+                min_x,
+                min_y,
+                max_y,
+                center_y,
+                height,
+            });
+        } else {
+            unboxed_items.push(t);
+        }
+    }
+
+    if items.is_empty() {
+        return unboxed_items.join("\n");
+    }
+    // Sort items top-to-bottom (center_y descending)
+    items.sort_by(|a, b| {
+        b.center_y
+            .partial_cmp(&a.center_y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    struct RowCluster<'a> {
+        items: Vec<LineItem<'a>>,
+        avg_center_y: f64,
+        avg_height: f64,
+    }
+
+    let mut clusters: Vec<RowCluster> = Vec::new();
+
+    for item in items {
+        let mut matched_idx = None;
+        let mut best_overlap = 0.0;
+
+        for (c_idx, cluster) in clusters.iter().enumerate() {
+            let ref_h = item.height.min(cluster.avg_height);
+            let vert_dist = (item.center_y - cluster.avg_center_y).abs();
+            let c_min_y = cluster.avg_center_y - (cluster.avg_height / 2.0);
+            let c_max_y = cluster.avg_center_y + (cluster.avg_height / 2.0);
+            let overlap_y = item.max_y.min(c_max_y) - item.min_y.max(c_min_y);
+
+            if overlap_y > (0.35 * ref_h) || vert_dist < (0.35 * ref_h) {
+                if overlap_y > best_overlap || matched_idx.is_none() {
+                    best_overlap = overlap_y;
+                    matched_idx = Some(c_idx);
+                }
+            }
+        }
+
+        if let Some(idx) = matched_idx {
+            let cluster = &mut clusters[idx];
+            cluster.items.push(item);
+            let count = cluster.items.len() as f64;
+            cluster.avg_center_y = cluster.items.iter().map(|it| it.center_y).sum::<f64>() / count;
+            cluster.avg_height = cluster.items.iter().map(|it| it.height).sum::<f64>() / count;
+        } else {
+            clusters.push(RowCluster {
+                avg_center_y: item.center_y,
+                avg_height: item.height,
+                items: vec![item],
+            });
+        }
+    }
+
+    // Sort rows from top to bottom (avg_center_y descending)
+    clusters.sort_by(|a, b| {
+        b.avg_center_y
+            .partial_cmp(&a.avg_center_y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut row_strings = Vec::new();
+    for mut cluster in clusters {
+        // Sort left-to-right (min_x ascending)
+        cluster.items.sort_by(|a, b| {
+            a.min_x
+                .partial_cmp(&b.min_x)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let row_text = cluster.items.iter().map(|it| it.text).collect::<Vec<_>>().join(" ");
+        if !row_text.is_empty() {
+            row_strings.push(row_text);
+        }
+    }
+
+    for unboxed in unboxed_items {
+        row_strings.push(unboxed.to_string());
+    }
+
+    row_strings.join("\n")
+}
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
     use super::OcrResult;
@@ -194,6 +327,77 @@ mod tests {
     fn test_ocr_invalid_file() {
         let res = extract_text_from_path("/nonexistent/file/path.png");
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_reconstruct_spatial_lines_multi_column_table() {
+        // Simulate columnar OCR output where columns were recognized separately:
+        // Row 1 (top, y=0.80): "CEE 0154-03" (x=0.05), "Principles Epidemiology" (x=0.25), "Mo, We 3:00PM - 4:15PM" (x=0.55)
+        // Row 2 (bottom, y=0.60): "CS 0150-09" (x=0.05), "Special Topics" (x=0.25), "Fr 2:00PM - 4:30PM" (x=0.55)
+        // Passed in out-of-order column order (all code lines first, then descriptions, then times)
+        let lines = vec![
+            OcrLine {
+                text: "CEE 0154-03".to_string(),
+                confidence: 0.99,
+                bounding_box: Some(BoundingBox { x: 0.05, y: 0.80, width: 0.15, height: 0.03 }),
+            },
+            OcrLine {
+                text: "CS 0150-09".to_string(),
+                confidence: 0.99,
+                bounding_box: Some(BoundingBox { x: 0.05, y: 0.60, width: 0.15, height: 0.03 }),
+            },
+            OcrLine {
+                text: "Principles Epidemiology (Lecture)".to_string(),
+                confidence: 0.98,
+                bounding_box: Some(BoundingBox { x: 0.25, y: 0.80, width: 0.25, height: 0.03 }),
+            },
+            OcrLine {
+                text: "Special Topics (Lecture)".to_string(),
+                confidence: 0.98,
+                bounding_box: Some(BoundingBox { x: 0.25, y: 0.60, width: 0.25, height: 0.03 }),
+            },
+            OcrLine {
+                text: "Mo, We 3:00PM - 4:15PM".to_string(),
+                confidence: 0.95,
+                bounding_box: Some(BoundingBox { x: 0.55, y: 0.80, width: 0.30, height: 0.03 }),
+            },
+            OcrLine {
+                text: "Fr 2:00PM - 4:30PM".to_string(),
+                confidence: 0.95,
+                bounding_box: Some(BoundingBox { x: 0.55, y: 0.60, width: 0.30, height: 0.03 }),
+            },
+        ];
+
+        let reconstructed = reconstruct_spatial_lines(&lines);
+        let rows: Vec<&str> = reconstructed.lines().collect();
+        assert_eq!(rows.len(), 2);
+
+        assert_eq!(
+            rows[0],
+            "CEE 0154-03 Principles Epidemiology (Lecture) Mo, We 3:00PM - 4:15PM"
+        );
+        assert_eq!(
+            rows[1],
+            "CS 0150-09 Special Topics (Lecture) Fr 2:00PM - 4:30PM"
+        );
+    }
+
+    #[test]
+    fn test_reconstruct_spatial_lines_fallback_no_boxes() {
+        let lines = vec![
+            OcrLine {
+                text: "Line 1".to_string(),
+                confidence: 0.9,
+                bounding_box: None,
+            },
+            OcrLine {
+                text: "Line 2".to_string(),
+                confidence: 0.9,
+                bounding_box: None,
+            },
+        ];
+        let text = reconstruct_spatial_lines(&lines);
+        assert_eq!(text, "Line 1\nLine 2");
     }
 
     #[test]

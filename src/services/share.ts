@@ -69,3 +69,19 @@ export function payloadToFile(payload: SharedImagePayload): File | null {
     lastModified: payload.timestamp ? payload.timestamp * 1000 : Date.now(),
   });
 }
+
+/**
+ * Loads an image from a local file path (e.g. from desktop drag-and-drop)
+ * and returns it as a browser File object.
+ */
+export async function loadImageFromPath(path: string): Promise<File | null> {
+  try {
+    const payload = await invoke<SharedImagePayload>("load_image_from_path", {
+      path,
+    });
+    return payloadToFile(payload);
+  } catch (err) {
+    console.error("Failed to load image from path:", err);
+    throw err;
+  }
+}

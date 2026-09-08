@@ -3,11 +3,22 @@
 ## [Unreleased] - 2026-09-07
 
 ### Added
-- **On-Device LLM Inference (`src-tauri/src/inference.rs`, `src/services/event.ts`)**:
-  - Integrated `llama-cpp-2` with Metal GPU acceleration on macOS and iOS for fast local text processing.
-  - Structured `CalendarEventDraft` extraction from OCR text with JSON schema prompting, grammar constraints, and timeout controls.
-  - Deterministic regex and heuristic fallback parser for handling inference timeouts, missing models, or non-JSON outputs.
-  - Added inference lifecycle management with active inference tracking and cancellation support (`extract_event_with_model`, `cancel_inference`).
+- **Desktop Drag & Drop Image Import (`src-tauri/src/share.rs`, `src-tauri/src/lib.rs`, `src/services/share.ts`, `src/App.vue`, `src/components/UploadHub.vue`)**:
+  - Added native desktop drag-and-drop support listening to Tauri webview events (`onDragDropEvent`) when files are dragged from Finder or File Explorer.
+  - Added backend command `load_image_from_path` to read dropped image files from filesystem paths into memory payloads with MIME type detection.
+  - Added frontend helper `loadImageFromPath` converting dropped payloads into browser `File` objects for seamless preview and OCR processing.
+  - Added window-level drag overlay and dynamic visual feedback during drag operations with seamless image replacement support.
+- **Multi-Event Parsing & Schedule Extraction (`src-tauri/src/parser.rs`, `src-tauri/src/inference.rs`, `src/services/event.ts`)**:
+  - Added multi-event structured schema and GBNF grammar for extracting multiple distinct calendar events (e.g. academic class schedules, conference agendas, timetables) from a single flyer or screenshot.
+  - Deterministic schedule table parser extracting course codes, titles, multi-day recurring meeting times (`Mo, We`, `Tu, Th`, `Fr`), locations (room/building/online), instructors, and unit details into distinct `EventDetails` with ISO-8601 timestamps.
+  - Deterministic agenda parser extracting multiple timed line items with location and description metadata.
+  - Orchestrated LLM inference supporting `EventsPayload` deserialization with seamless deterministic fallback.
+  - Batch calendar integration (`create_calendar_events`, `addEventsToNativeCalendar`) and multi-event RFC 5545 `.ics` export (`generateMultiIcsCalendarContent`, `downloadMultiIcsFile`).
+- **Event Preview Page & Two-Stage UI Workflow (`src/components/EventPreviewCard.vue`, `src/components/EventFormCard.vue`, `src/App.vue`)**:
+  - Added `EventPreviewCard.vue` as an intermediate preview stage following image scan/OCR, presenting compact summary cards for single events or multi-event lists.
+  - Interactive event cards showing title, timing, location, notes, and match confidence, with tap-to-edit navigation to the full event editing screen.
+  - Batch actions on the preview page: "Add All to Calendar", "Export All (.ics)", "Copy All", and individual event removal.
+  - Updated `EventFormCard.vue` with back navigation ("← Back to Events"), event position indicator ("Event X of Y"), and "Done Editing" actions.
 - **Model Management & Downloader (`src-tauri/src/model.rs`, `model-manifest.json`, `src/services/model.ts`)**:
   - Direct Hugging Face LFS distribution for quantized GGUF models: `SmolLM2-360M-Instruct` (default, Q4_K_M, ~270 MB), `SmolLM2-135M-Instruct` (Q4_K_M, ~105 MB), and `Qwen2.5-0.5B-Instruct` (Q4_K_M, ~491 MB).
   - Resumable streaming HTTP downloader with `Range` header support, atomic `.part` staging, and graceful cancellation.

@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { EventFormData } from "../services/event";
+import { computed, ref, watch } from "vue";
+import {
+  parseRecurrenceRule,
+  buildRecurrenceRule,
+  type EventFormData,
+  type ParsedRecurrence,
+} from "../services/event";
 
 const model = defineModel<EventFormData>({ required: true });
 
@@ -8,40 +13,117 @@ const props = defineProps<{
   confidence: number;
   isAddingToCalendar?: boolean;
   copiedSummary?: boolean;
+  currentIndex?: number;
+  totalEvents?: number;
 }>();
 
 const emit = defineEmits<{
   (e: "addToCalendar"): void;
   (e: "exportIcs"): void;
   (e: "copySummary"): void;
+  (e: "back"): void;
+  (e: "remove"): void;
 }>();
 
 const confidencePercent = computed(() => Math.round(props.confidence * 100));
+
+const isRepeating = ref(Boolean(model.value.recurrenceRule?.trim()));
+const parsedRecurrence = ref<ParsedRecurrence>(
+  parseRecurrenceRule(model.value.recurrenceRule) || {
+    frequency: "WEEKLY",
+    interval: 1,
+    byDays: [],
+    until: null,
+    count: null,
+  }
+);
+
+const repeatDays = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+const dayLabels: Record<string, string> = {
+  MO: "Mon",
+  TU: "Tue",
+  WE: "Wed",
+  TH: "Thu",
+  FR: "Fri",
+  SA: "Sat",
+  SU: "Sun",
+};
+
+function toggleDay(day: string) {
+  const current = parsedRecurrence.value.byDays;
+  if (current.includes(day)) {
+    parsedRecurrence.value.byDays = current.filter((d) => d !== day);
+  } else {
+    parsedRecurrence.value.byDays = [...current, day];
+  }
+  syncRecurrenceToModel();
+}
+
+function syncRecurrenceToModel() {
+  if (!isRepeating.value) {
+    model.value.recurrenceRule = "";
+    return;
+  }
+  model.value.recurrenceRule = buildRecurrenceRule(parsedRecurrence.value) || "";
+}
+
+watch(
+  () => model.value.recurrenceRule,
+  (newVal) => {
+    if (newVal) {
+      isRepeating.value = true;
+      const parsed = parseRecurrenceRule(newVal);
+      if (parsed) parsedRecurrence.value = parsed;
+    }
+  }
+);
+
+watch(isRepeating, (newVal) => {
+  if (newVal && parsedRecurrence.value.byDays.length === 0) {
+    if (model.value.date) {
+      const d = new Date(model.value.date + "T12:00:00");
+      const jsDay = d.getDay();
+      const dayCodes = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+      parsedRecurrence.value.byDays = [dayCodes[jsDay]];
+    }
+  }
+  syncRecurrenceToModel();
+});
 </script>
 
 <template>
   <div class="surface-card event-section">
     <div class="section-header">
       <div class="section-title-wrap">
-        <div class="section-icon-bubble">
+        <button
+          type="button"
+          class="btn-back-nav"
+          title="Back to event summary"
+          @click="emit('back')"
+        >
           <svg
-            class="section-icon"
+            class="back-icon"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
+            stroke-width="2.5"
             stroke-linecap="round"
             stroke-linejoin="round"
           >
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
           </svg>
-        </div>
+          <span>Back</span>
+        </button>
+
         <div>
-          <h2 class="section-heading">Event Details</h2>
-          <p class="section-subheading">Review and adjust before adding to calendar</p>
+          <div class="heading-with-index">
+            <h2 class="section-heading">Edit Event Details</h2>
+            <span v-if="totalEvents && totalEvents > 1" class="event-counter-chip">
+              {{ (currentIndex ?? 0) + 1 }} of {{ totalEvents }}
+            </span>
+          </div>
+          <p class="section-subheading">Adjust fields and save or add to calendar</p>
         </div>
       </div>
 
@@ -140,6 +222,50 @@ const confidencePercent = computed(() => Math.round(props.confidence * 100));
           />
         </div>
       </div>
+      <!-- Recurrence / Repeat Section -->
+      <div class="field-item recurrence-card-section">
+        <div class="toggle-control-row">
+          <label class="toggle-control" for="event-repeats-toggle">
+            <span class="toggle-label-text">Repeating Class / Event</span>
+            <div class="switch-wrap">
+              <input
+                id="event-repeats-toggle"
+                v-model="isRepeating"
+                type="checkbox"
+                class="switch-input"
+              />
+              <span class="switch-slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <div v-if="isRepeating" class="recurrence-subform">
+          <div class="days-selector-label">Repeats on days:</div>
+          <div class="days-chip-group">
+            <button
+              v-for="d in repeatDays"
+              :key="d"
+              type="button"
+              class="day-chip-btn"
+              :class="{ 'day-chip-active': parsedRecurrence.byDays.includes(d) }"
+              @click="toggleDay(d)"
+            >
+              {{ dayLabels[d] }}
+            </button>
+          </div>
+
+          <div class="field-item until-field-item">
+            <label class="field-label" for="event-until-date">End Repeat Date (Optional)</label>
+            <input
+              id="event-until-date"
+              v-model="parsedRecurrence.until"
+              type="date"
+              class="field-input field-input-date"
+              @change="syncRecurrenceToModel"
+            />
+          </div>
+        </div>
+      </div>
 
       <!-- Description & Notes Field -->
       <div class="field-item">
@@ -187,6 +313,25 @@ const confidencePercent = computed(() => Math.round(props.confidence * 100));
       </button>
 
       <div class="secondary-button-row">
+        <button
+          type="button"
+          class="btn-touch btn-touch-outline btn-done-editing"
+          @click="emit('back')"
+        >
+          <svg
+            class="btn-icon-sm"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span>Done Editing</span>
+        </button>
+
         <button type="button" class="btn-touch btn-touch-outline" @click="emit('exportIcs')">
           <svg
             class="btn-icon-sm"
@@ -237,8 +382,30 @@ const confidencePercent = computed(() => Math.round(props.confidence * 100));
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
-            <span>Copy Summary</span>
+            <span>Copy</span>
           </template>
+        </button>
+      </div>
+
+      <div v-if="totalEvents && totalEvents > 1" class="delete-action-row">
+        <button
+          type="button"
+          class="btn-delete-event"
+          @click="emit('remove')"
+        >
+          <svg
+            class="delete-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          <span>Remove this event from list</span>
         </button>
       </div>
     </div>
@@ -472,7 +639,153 @@ const confidencePercent = computed(() => Math.round(props.confidence * 100));
 
 .secondary-button-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .secondary-button-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btn-back-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  color: var(--accent-primary);
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.btn-back-nav:hover {
+  background: var(--border-input);
+}
+
+.back-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.heading-with-index {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.event-counter-chip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  background: var(--accent-primary-light);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.recurrence-card-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
+}
+
+.toggle-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recurrence-subform {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.days-selector-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.days-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.day-chip-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border-input);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.day-chip-btn:hover {
+  background: var(--bg-card-elevated);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.day-chip-btn.day-chip-active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+
+.until-field-item {
+  margin-top: 0.25rem;
+}
+.btn-done-editing {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.delete-action-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-card-subtle);
+}
+
+.btn-delete-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: none;
+  color: #ff3b30;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-delete-event:hover {
+  background: rgba(255, 59, 48, 0.1);
+}
+
+.delete-icon {
+  width: 14px;
+  height: 14px;
 }
 </style>

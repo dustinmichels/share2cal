@@ -100,6 +100,142 @@ int calendar_apple_request_permission(int *out_granted, char **out_error) {
     }
 }
 
+static EKRecurrenceRule *parse_rrule_string(NSString *rruleStr, NSTimeZone *eventTimeZone, NSString **outError) {
+    if (!rruleStr || rruleStr.length == 0) return nil;
+
+    NSString *rule = [rruleStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([rule hasPrefix:@"RRULE:"]) {
+        rule = [rule substringFromIndex:6];
+    }
+
+    NSArray<NSString *> *parts = [rule componentsSeparatedByString:@";"];
+    EKRecurrenceFrequency frequency = EKRecurrenceFrequencyWeekly;
+    BOOL hasFreq = NO;
+    NSInteger interval = 1;
+    NSMutableArray<EKRecurrenceDayOfWeek *> *daysOfTheWeek = [NSMutableArray array];
+    EKRecurrenceEnd *recurrenceEnd = nil;
+
+    for (NSString *part in parts) {
+        NSString *trimmedPart = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmedPart.length == 0) continue;
+
+        NSRange eqRange = [trimmedPart rangeOfString:@"="];
+        if (eqRange.location == NSNotFound) {
+            if (outError) *outError = [NSString stringWithFormat:@"Malformed recurrence property (missing '='): %@", trimmedPart];
+            return nil;
+        }
+
+        NSString *key = [[trimmedPart substringToIndex:eqRange.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].uppercaseString;
+        NSString *val = [[trimmedPart substringFromIndex:eqRange.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+        if (key.length == 0 || val.length == 0) {
+            if (outError) *outError = [NSString stringWithFormat:@"Empty key or value in recurrence property: %@", trimmedPart];
+            return nil;
+        }
+
+        if ([key isEqualToString:@"FREQ"]) {
+            NSString *freqVal = [val uppercaseString];
+            if ([freqVal isEqualToString:@"DAILY"]) {
+                frequency = EKRecurrenceFrequencyDaily;
+                hasFreq = YES;
+            } else if ([freqVal isEqualToString:@"WEEKLY"]) {
+                frequency = EKRecurrenceFrequencyWeekly;
+                hasFreq = YES;
+            } else if ([freqVal isEqualToString:@"MONTHLY"]) {
+                frequency = EKRecurrenceFrequencyMonthly;
+                hasFreq = YES;
+            } else if ([freqVal isEqualToString:@"YEARLY"]) {
+                frequency = EKRecurrenceFrequencyYearly;
+                hasFreq = YES;
+            } else {
+                if (outError) *outError = [NSString stringWithFormat:@"Invalid FREQ value: %@", val];
+                return nil;
+            }
+        } else if ([key isEqualToString:@"INTERVAL"]) {
+            NSInteger intVal = [val integerValue];
+            if (intVal <= 0) {
+                if (outError) *outError = [NSString stringWithFormat:@"INTERVAL must be a positive integer: %@", val];
+                return nil;
+            }
+            interval = intVal;
+        } else if ([key isEqualToString:@"BYDAY"]) {
+            NSArray<NSString *> *dayTokens = [[val uppercaseString] componentsSeparatedByString:@","];
+            for (NSString *dt in dayTokens) {
+                NSString *dayCode = [dt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if ([dayCode isEqualToString:@"MO"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdayMonday]];
+                } else if ([dayCode isEqualToString:@"TU"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdayTuesday]];
+                } else if ([dayCode isEqualToString:@"WE"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdayWednesday]];
+                } else if ([dayCode isEqualToString:@"TH"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdayThursday]];
+                } else if ([dayCode isEqualToString:@"FR"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdayFriday]];
+                } else if ([dayCode isEqualToString:@"SA"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdaySaturday]];
+                } else if ([dayCode isEqualToString:@"SU"]) {
+                    [daysOfTheWeek addObject:[EKRecurrenceDayOfWeek dayOfWeek:EKWeekdaySunday]];
+                } else {
+                    if (outError) *outError = [NSString stringWithFormat:@"Invalid BYDAY token: %@", dt];
+                    return nil;
+                }
+            }
+        } else if ([key isEqualToString:@"UNTIL"]) {
+            NSDateFormatter *df = [[NSDateFormatter alloc] init];
+            df.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+
+            NSDate *untilDate = nil;
+            if ([val hasSuffix:@"Z"] || [val hasSuffix:@"z"]) {
+                df.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+                df.dateFormat = @"yyyyMMdd'T'HHmmss'Z'";
+                untilDate = [df dateFromString:val];
+            } else if ([val containsString:@"T"]) {
+                df.timeZone = eventTimeZone ?: [NSTimeZone defaultTimeZone];
+                df.dateFormat = @"yyyyMMdd'T'HHmmss";
+                untilDate = [df dateFromString:val];
+            } else {
+                df.timeZone = eventTimeZone ?: [NSTimeZone defaultTimeZone];
+                df.dateFormat = @"yyyyMMdd'T'HHmmss";
+                NSString *eodStr = [NSString stringWithFormat:@"%@T235959", val];
+                untilDate = [df dateFromString:eodStr];
+            }
+
+            if (!untilDate) {
+                if (outError) *outError = [NSString stringWithFormat:@"Invalid UNTIL date format: %@", val];
+                return nil;
+            }
+            recurrenceEnd = [EKRecurrenceEnd recurrenceEndWithEndDate:untilDate];
+        } else if ([key isEqualToString:@"COUNT"]) {
+            NSInteger countVal = [val integerValue];
+            if (countVal <= 0) {
+                if (outError) *outError = [NSString stringWithFormat:@"COUNT must be a positive integer: %@", val];
+                return nil;
+            }
+            recurrenceEnd = [EKRecurrenceEnd recurrenceEndWithOccurrenceCount:countVal];
+        } else {
+            if (outError) *outError = [NSString stringWithFormat:@"Unsupported recurrence property: %@", key];
+            return nil;
+        }
+    }
+
+    if (!hasFreq) {
+        if (outError) *outError = @"Recurrence rule is missing required FREQ property.";
+        return nil;
+    }
+
+    return [[EKRecurrenceRule alloc]
+        initRecurrenceWithFrequency:frequency
+                           interval:interval
+                      daysOfTheWeek:daysOfTheWeek.count > 0 ? daysOfTheWeek : nil
+                     daysOfTheMonth:nil
+                    monthsOfTheYear:nil
+                     weeksOfTheYear:nil
+                      daysOfTheYear:nil
+                       setPositions:nil
+                                end:recurrenceEnd];
+}
+
 int calendar_apple_create_event(
     const char *title,
     double start_epoch,
@@ -108,6 +244,7 @@ int calendar_apple_create_event(
     const char *location,
     const char *notes,
     const char *url,
+    const char *recurrence_rule,
     char **out_event_id,
     char **out_error
 ) {
@@ -198,6 +335,20 @@ int calendar_apple_create_event(
                 event.URL = nsUrl;
             }
         }
+        if (recurrence_rule && strlen(recurrence_rule) > 0) {
+            NSString *rruleStr = [NSString stringWithUTF8String:recurrence_rule];
+            NSString *parseErr = nil;
+            NSTimeZone *eventTz = event.timeZone ?: [NSTimeZone defaultTimeZone];
+            EKRecurrenceRule *rule = parse_rrule_string(rruleStr, eventTz, &parseErr);
+            if (!rule) {
+                if (out_error) {
+                    *out_error = create_c_string(parseErr ?: @"Invalid recurrence rule specified.");
+                }
+                return -1;
+            }
+            [event addRecurrenceRule:rule];
+        }
+
 
         NSError *saveError = nil;
         BOOL success = [store saveEvent:event span:EKSpanThisEvent commit:YES error:&saveError];

@@ -34,4 +34,23 @@ describe("Share Service", () => {
     const file = payloadToFile(payload);
     expect(file).toBeNull();
   });
+
+  it("handles different mime types and timestamps properly in payloadToFile", () => {
+    const sampleBytes = [255, 216, 255]; // JPEG header
+    const payload: SharedImagePayload = {
+      file_name: "poster.jpeg",
+      file_path: "/Users/test/Downloads/poster.jpeg",
+      mime_type: "image/jpeg",
+      size_bytes: sampleBytes.length,
+      timestamp: 1700000000,
+      source: "drag_and_drop",
+      bytes: sampleBytes,
+    };
+
+    const file = payloadToFile(payload);
+    expect(file).not.toBeNull();
+    expect(file!.name).toBe("poster.jpeg");
+    expect(file!.type).toBe("image/jpeg");
+    expect(file!.lastModified).toBe(1700000000 * 1000);
+  });
 });
