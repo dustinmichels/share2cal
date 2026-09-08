@@ -4,39 +4,39 @@
 
 ## 1. Parsing Accuracy & Deterministic Heuristics
 
-- [ ] **Fix weekday resolution for recurring cards**
-  - [ ] Tighten `get_weekday_date` (`parser.rs:821`) condition to `target_date < ref_date` (instead of `< ref_date - 1 day`) to prevent resolved DTSTART landing in the past for one-off weekday references, allowing callers to opt into a grace day.
-  - [ ] Decouple RRULE derivation from date absence in `parse_single_event_deterministic` (`parser.rs:949`) so cards with both explicit dates and weekday patterns (e.g. "Starts Sep 8 · Mo, We 1:20–4:20") emit recurrence rules.
-- [ ] **Remove sample-specific literals from entity extraction**
-  - [ ] `extract_location`: drop `lower.contains("skilton")` (`parser.rs:1335`) and replace unanchored `lower.contains("st")` with token/suffix matching (`\b(st|street)\b`).
-  - [ ] `extract_description` (`parser.rs:~1620-1640`): replace hardcoded keyword allowlists (`"PIZZA"`, `"RIDE."`, `"STREETS EXIST"`, `"TUFFS_UEP"`, `"SPECIAL GUEST"`, etc.) with structural heuristics (bullet-list membership, line length, capitalisation ratio, position relative to title/time blocks).
-  - [ ] Implement generalizable rules for entity extraction: room/hall/building patterns, `venue + city/state` delimiters, street-address matching.
-- [ ] **Gate day-abbreviation matching on time context**
-  - [ ] Guard `day_pattern_re.find(ocr_text)` in `parse_single_event_deterministic` (`parser.rs:950`) with a time-range / course-code check (matching `parse_row_schedule_table_events:435-438`), preventing bare words like "we" or "sun" from fabricating weekly recurrence rules on one-off flyers.
-  - [ ] Audit and apply appropriate guards to `parse_agenda_events` (`parser.rs:835`).
+- [x] **Fix weekday resolution for recurring cards**
+  - [x] Tighten `get_weekday_date` (`parser.rs:821`) condition to `target_date < ref_date` (instead of `< ref_date - 1 day`) to prevent resolved DTSTART landing in the past for one-off weekday references, allowing callers to opt into a grace day.
+  - [x] Decouple RRULE derivation from date absence in `parse_single_event_deterministic` (`parser.rs:949`) so cards with both explicit dates and weekday patterns (e.g. "Starts Sep 8 · Mo, We 1:20–4:20") emit recurrence rules.
+- [x] **Remove sample-specific literals from entity extraction**
+  - [x] `extract_location`: drop `lower.contains("skilton")` (`parser.rs:1335`) and replace unanchored `lower.contains("st")` with token/suffix matching (`\b(st|street)\b`).
+  - [x] `extract_description` (`parser.rs:~1620-1640`): replace hardcoded keyword allowlists (`"PIZZA"`, `"RIDE."`, `"STREETS EXIST"`, `"TUFFS_UEP"`, `"SPECIAL GUEST"`, etc.) with structural heuristics (bullet-list membership, line length, capitalisation ratio, position relative to title/time blocks).
+  - [x] Implement generalizable rules for entity extraction: room/hall/building patterns, `venue + city/state` delimiters, street-address matching.
+- [x] **Gate day-abbreviation matching on time context**
+  - [x] Guard `day_pattern_re.find(ocr_text)` in `parse_single_event_deterministic` (`parser.rs:950`) with a time-range / course-code check (matching `parse_row_schedule_table_events:435-438`), preventing bare words like "we" or "sun" from fabricating weekly recurrence rules on one-off flyers.
+  - [x] Audit and apply appropriate guards to `parse_agenda_events` (`parser.rs:835`).
 
 ---
 
 ## 2. Test Harness Rigor & Ground-Truth Validation
 
-- [ ] **Eliminate title-only `||` escape hatches**
-  - [ ] Remove fallback disjunctions at `lib.rs:1676, 1710, 1744, 1782, 1815, 1849` (`matched || events.iter().any(|ev| ev.title.contains("gilman") || …)`), which let tests pass on title substring alone.
-- [ ] **Assert the fields `parsed.json` actually carries**
-  - [ ] Assert `is_all_day`, `start_time`, and `end_time` directly, normalising the 12-hour ground truth in `samples/parsed.json` to 24-hour before comparison.
-  - [ ] Derive expected `BYDAY` sets from `days` and `repeating` arrays to assert against parsed `recurrence_rule`.
-  - [ ] Assert containment of significant ground-truth location tokens against the flat `location` field.
-- [ ] **Aggregated sample mismatch reporting**
-  - [ ] Collect all sample mismatches into one structured summary per test run instead of aborting on the first failure.
-- [ ] **Explicit enhanced-mode execution verification**
-  - [ ] Make missing model weights in `test_all_samples_llm_inference_enhanced_against_parsed_json` (`lib.rs:1627-1633`) an explicit skip (env-gated hard failure in CI or visible ignored-test) rather than a silent pass.
+- [x] **Eliminate title-only `||` escape hatches**
+  - [x] Remove fallback disjunctions at `lib.rs:1676, 1710, 1744, 1782, 1815, 1849` (`matched || events.iter().any(|ev| ev.title.contains("gilman") || …)`), which let tests pass on title substring alone.
+- [x] **Assert the fields `parsed.json` actually carries**
+  - [x] Assert `is_all_day`, `start_time`, and `end_time` directly, normalising the 12-hour ground truth in `samples/parsed.json` to 24-hour before comparison.
+  - [x] Derive expected `BYDAY` sets from `days` and `repeating` arrays to assert against parsed `recurrence_rule`.
+  - [x] Assert containment of significant ground-truth location tokens against the flat `location` field.
+- [x] **Aggregated sample mismatch reporting**
+  - [x] Collect all sample mismatches into one structured summary per test run instead of aborting on the first failure.
+- [x] **Explicit enhanced-mode execution verification**
+  - [x] Make missing model weights in `test_all_samples_llm_inference_enhanced_against_parsed_json` (`lib.rs:1627-1633`) an explicit skip (env-gated hard failure in CI or visible ignored-test) rather than a silent pass.
 
 ---
 
 ## 3. Enhanced LLM Inference & GBNF Grammar Robustness
 
-- [ ] **Reserve generation headroom and trim dense OCR text**
-  - [ ] Reserve an explicit `MAX_OUTPUT_TOKENS` budget in `inference.rs:191` (reject/trim when `prompt_tokens + reserve > n_ctx` instead of checking `tokens.len() >= DEFAULT_CONTEXT_WINDOW`).
-  - [ ] Replace hard error with adaptive trimming in `generate_extraction_prompt()` (`parser.rs:267-290`): drop low-signal OCR lines until the prompt fits the budget rather than failing extraction.
+- [x] **Reserve generation headroom and trim dense OCR text**
+  - [x] Reserve an explicit `MAX_OUTPUT_TOKENS` budget in `inference.rs:191` (reject/trim when `prompt_tokens + reserve > n_ctx` instead of checking `tokens.len() >= DEFAULT_CONTEXT_WINDOW`).
+  - [x] Replace hard error with adaptive trimming in `generate_extraction_prompt()` (`parser.rs:267-290`): drop low-signal OCR lines until the prompt fits the budget rather than failing extraction.
 
 ---
 

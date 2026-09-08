@@ -410,6 +410,16 @@ mod tests {
     }
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn test_ocr_commons_sample() {
+        let sample = get_sample_path("commons.jpg");
+        assert!(sample.exists(), "Sample file {:?} should exist", sample);
+
+        let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed on commons.jpg");
+        println!("--- Extracted OCR Text for commons.jpg ---\n{}\n---------------------------------------------", result.text);
+        assert!(!result.text.is_empty(), "Extracted text should not be empty");
+    }
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     fn test_ocr_from_bytes() {
         let sample = get_sample_path("gilman_flyer.png");
         let bytes = std::fs::read(&sample).expect("Should read sample file");

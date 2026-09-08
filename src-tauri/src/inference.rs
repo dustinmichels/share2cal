@@ -53,6 +53,9 @@ impl LlmEventOutput {
 /// Default context window limit to minimize KV cache RAM footprint on mobile devices
 pub const DEFAULT_CONTEXT_WINDOW: u32 = 2048;
 
+/// Explicit output token reservation budget to guarantee generation headroom within the context window
+pub const MAX_OUTPUT_TOKENS: usize = 512;
+
 /// Default maximum tokens generated for structured event JSON output
 pub const DEFAULT_MAX_GENERATION_TOKENS: usize = 1536;
 
@@ -188,11 +191,14 @@ pub fn run_inference_sync(
         return Err("Prompt resulted in zero tokens".to_string());
     }
 
-    if tokens.len() >= DEFAULT_CONTEXT_WINDOW as usize {
+    let n_ctx = DEFAULT_CONTEXT_WINDOW as usize;
+    let reserve = max_tokens.min(MAX_OUTPUT_TOKENS);
+    if tokens.len() + reserve > n_ctx {
         return Err(format!(
-            "Prompt exceeds context window limit ({} >= {})",
+            "Prompt exceeds context window limit with reserved output headroom (tokens: {}, reserve: {}, n_ctx: {})",
             tokens.len(),
-            DEFAULT_CONTEXT_WINDOW
+            reserve,
+            n_ctx
         ));
     }
 
@@ -225,7 +231,8 @@ pub fn run_inference_sync(
     sampler.accept(token);
     batch.clear();
 
-    for _step in 0..max_tokens {
+    let max_generation_steps = max_tokens.min(n_ctx.saturating_sub(total_prompt_tokens));
+    for _step in 0..max_generation_steps {
         if let Some(dl) = deadline {
             if Instant::now() >= dl {
                 return Err("Inference deadline exceeded".to_string());
@@ -638,6 +645,16 @@ mod tests {
 
         let payload: LlmEventsPayload = serde_json::from_str(raw_json).expect("Should parse multi-event JSON");
         assert_eq!(payload.events.len(), 2);
+    }
+
+    #[test]
+    fn test_context_window_and_headroom_constants() {
+        assert_eq!(DEFAULT_CONTEXT_WINDOW, 2048);
+        assert_eq!(MAX_OUTPUT_TOKENS, 512);
+        assert_eq!(DEFAULT_MAX_GENERATION_TOKENS, 1536);
+        assert!(MAX_OUTPUT_TOKENS < DEFAULT_CONTEXT_WINDOW as usize);
+        let max_prompt_budget = (DEFAULT_CONTEXT_WINDOW as usize) - MAX_OUTPUT_TOKENS;
+        assert_eq!(max_prompt_budget, 1536);
     }
 
     #[tokio::test]

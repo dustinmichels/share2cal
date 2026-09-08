@@ -1,10 +1,11 @@
+use crate::inference::{DEFAULT_CONTEXT_WINDOW, MAX_OUTPUT_TOKENS};
 use chrono::{
     DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime,
     Offset, TimeZone,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-
+use std::sync::LazyLock;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventDetails {
     pub title: String,
@@ -264,6 +265,183 @@ pub fn get_json_schema() -> serde_json::Value {
     })
 }
 
+/// Maximum prompt token budget reserved for input context (context window - max output tokens)
+pub const MAX_PROMPT_TOKENS: usize = (DEFAULT_CONTEXT_WINDOW as usize) - MAX_OUTPUT_TOKENS;
+
+static COURSE_CODE_PROMPT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Z]{2,6}[-\s]\d{3,4}").unwrap());
+
+/// Estimates the number of tokens in a string using a conservative character and structure heuristic
+pub fn estimate_token_count(text: &str) -> usize {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    // Conservative estimate: ~3.0 characters per token for OCR/prompt text, rounding up
+    trimmed.chars().count().div_ceil(3)
+}
+
+/// Scores an OCR line to prioritize retention of high-signal calendar event details during adaptive prompt trimming
+fn score_ocr_line(line: &str, line_idx: usize, _total_lines: usize) -> i32 {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return -100;
+    }
+    if is_noise_or_metadata_line(trimmed) {
+        return -50;
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with('@')
+        || lower.starts_with('#')
+        || lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("www.")
+    {
+        return -30;
+    }
+    if trimmed.len() < 3 && !trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return -25;
+    }
+    if trimmed
+        .chars()
+        .all(|c| c.is_ascii_punctuation() || c.is_whitespace() || c.is_ascii_digit())
+        && !is_date_or_time_line(trimmed)
+    {
+        return -20;
+    }
+
+    let mut score = 10;
+
+    // Header boost for top lines (often title/artist)
+    if line_idx < 3 {
+        score += match line_idx {
+            0 => 30,
+            1 => 20,
+            _ => 10,
+        };
+    }
+
+    // High signal: Date or time patterns
+    if is_date_or_time_line(trimmed) {
+        score += 50;
+    }
+
+    // High signal: Course codes / Schedule indicators (e.g. CS 0150, MATH 101)
+    if COURSE_CODE_PROMPT_RE.is_match(trimmed) {
+        score += 40;
+    }
+
+    // High signal: Common event keywords
+    let event_keywords = [
+        "FESTIVAL", "CONCERT", "PARTY", "CELEBRATION", "MEETUP", "MEETING",
+        "CONFERENCE", "SUMMIT", "WORKSHOP", "SYMPOSIUM", "WEBINAR", "SHOW",
+        "EXHIBITION", "FAIR", "GALA", "DINNER", "BRUNCH", "FUNDRAISER",
+        "PARADE", "MARKET", "BLOCK PARTY", "OPEN MIC", "GAME NIGHT", "TRIVIA",
+        "BBQ", "COOKOUT", "LAUNCH", "BIRTHDAY", "WEDDING", "SOCIAL", "RECEPTION",
+        "RIDE", "RALLY", "WALK", "RUN", "MARATHON", "TOUR", "RACE",
+        "SEMINAR", "LECTURE", "CLASS", "COURSE", "TALK", "PANEL",
+    ];
+    let upper = trimmed.to_uppercase();
+    if event_keywords.iter().any(|&kw| upper.contains(kw)) {
+        score += 30;
+    }
+
+    // Location / Venue keywords
+    let location_keywords = [
+        "ROOM", "HALL", "STREET", "ST", "AVE", "AVENUE", "BLVD", "BLDG",
+        "BUILDING", "CENTER", "CENTRE", "AUDITORIUM", "LAB", "SQUARE", "PARK",
+        "CAMPUS", "THEATER", "THEATRE", "LIBRARY", "PLAZA", "SUITE", "FLOOR",
+    ];
+    if location_keywords.iter().any(|&kw| {
+        let words: Vec<&str> = upper.split_whitespace().collect();
+        words.contains(&kw)
+    }) {
+        score += 30;
+    }
+
+    // Bullet points / descriptions
+    if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•') {
+        score += 15;
+    }
+
+    score
+}
+
+/// Adaptively trims OCR text to fit within a given token budget by iteratively dropping low-signal lines
+pub fn trim_ocr_text_to_budget(ocr_text: &str, max_tokens: usize) -> String {
+    let trimmed = ocr_text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if estimate_token_count(trimmed) <= max_tokens {
+        return trimmed.to_string();
+    }
+
+    let lines: Vec<&str> = trimmed.lines().collect();
+    if lines.len() <= 1 {
+        let char_limit = max_tokens * 3;
+        if trimmed.chars().count() > char_limit {
+            return format!("{}...", trimmed.chars().take(char_limit).collect::<String>());
+        }
+        return trimmed.to_string();
+    }
+
+    let total_lines = lines.len();
+    let scored: Vec<(usize, &str, i32)> = lines
+        .iter()
+        .enumerate()
+        .map(|(idx, &line)| (idx, line, score_ocr_line(line, idx, total_lines)))
+        .collect();
+
+    // Track token weight per line (token estimate of trimmed line + 1 for newline separator)
+    let line_tokens: Vec<usize> = lines
+        .iter()
+        .map(|l| estimate_token_count(l) + 1)
+        .collect();
+    let mut current_estimated_tokens: usize = line_tokens.iter().sum();
+
+    let mut included = vec![true; total_lines];
+
+    // Candidate drop order: lowest score first; break ties by dropping later lines first
+    let mut drop_order: Vec<usize> = (0..total_lines).collect();
+    drop_order.sort_by(|&a, &b| {
+        let score_a = scored[a].2;
+        let score_b = scored[b].2;
+        if score_a != score_b {
+            score_a.cmp(&score_b)
+        } else {
+            b.cmp(&a)
+        }
+    });
+
+    for &drop_idx in &drop_order {
+        if current_estimated_tokens <= max_tokens {
+            break;
+        }
+        included[drop_idx] = false;
+        current_estimated_tokens = current_estimated_tokens.saturating_sub(line_tokens[drop_idx]);
+    }
+
+    let mut remaining: String = scored
+        .iter()
+        .filter(|(idx, _, _)| included[*idx])
+        .map(|(_, line, _)| *line)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if remaining.trim().is_empty() {
+        remaining = lines.into_iter().take(3).collect::<Vec<_>>().join("\n");
+    }
+
+    let char_limit = max_tokens * 3;
+    if remaining.chars().count() > char_limit {
+        remaining = format!("{}...", remaining.chars().take(char_limit).collect::<String>());
+    }
+
+    remaining
+}
+
 pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) -> String {
     let ref_dt = context.get_reference_datetime();
     let ref_str = ref_dt.to_rfc3339();
@@ -277,13 +455,25 @@ pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) ->
         chrono::Weekday::Sun => "Sunday",
     };
 
-    format!(
+    let template_prefix = format!(
         "<|im_start|>system\nYou are a calendar assistant. Extract all events from the OCR text into a JSON object with an \"events\" array.\n\
         Each event must have fields: \"title\" (string), \"start_time\" (ISO-8601 or YYYY-MM-DD or null), \"end_time\" (ISO-8601 or YYYY-MM-DD or null), \"is_all_day\" (boolean), \"location\" (string or null), \"description\" (string or null), \"recurrence_rule\" (string or null, e.g. FREQ=WEEKLY;BYDAY=MO,WE). Output ONLY raw JSON.\n\
         Reference Time: {} ({})<|im_end|>\n\
-        <|im_start|>user\n{}\n<|im_end|>\n\
-        <|im_start|>assistant\n{{\"events\": [",
-        ref_str, day_name, ocr_text.trim()
+        <|im_start|>user\n",
+        ref_str, day_name
+    );
+    let template_suffix = "\n<|im_end|>\n<|im_start|>assistant\n{\"events\": [";
+
+    let template_tokens = estimate_token_count(&template_prefix) + estimate_token_count(template_suffix);
+    let ocr_budget = MAX_PROMPT_TOKENS.saturating_sub(template_tokens);
+
+    let effective_ocr_text = trim_ocr_text_to_budget(ocr_text, ocr_budget);
+
+    format!(
+        "{}{}{}",
+        template_prefix,
+        effective_ocr_text.trim(),
+        template_suffix
     )
 }
 
@@ -817,9 +1007,9 @@ fn get_weekday_date(day_abbr: &str, ref_dt: DateTime<FixedOffset>) -> Option<Nai
     let target_offset = target_weekday.num_days_from_monday() as i64;
     let mut target_date = monday_date + Duration::days(target_offset);
     
-    // If target date is before ref_date by more than 1 day in the past week, advance to next week
-    if target_date < ref_date - Duration::days(1) {
-        target_date = target_date + Duration::days(7);
+    // If target date is before ref_date, advance to next week
+    if target_date < ref_date {
+        target_date += Duration::days(7);
     }
 
     Some(target_date)
@@ -848,7 +1038,21 @@ pub fn parse_agenda_events(ocr_text: &str, context: &ReferenceContext) -> Vec<Ev
             let times_opt = extract_times(time_str);
 
             if let Some((start_time, end_time_opt)) = times_opt {
-                let days_opt = day_pattern_re.find(line).map(|m| m.as_str().to_string());
+                let days_opt = day_pattern_re.find(line).and_then(|m| {
+                    let s = m.as_str().trim();
+                    let bydays = parse_weekdays_to_byday(s);
+                    if bydays.is_empty() {
+                        return None;
+                    }
+                    let lower = s.to_lowercase();
+                    let is_ambiguous = (lower == "we" || lower == "sun" || lower == "sat" || lower == "mon" || lower == "th")
+                        && line.split_whitespace().count() > 4
+                        && bydays.len() == 1;
+                    if is_ambiguous && !line.to_lowercase().contains("every") && !line.to_lowercase().contains("weekly") {
+                        return None;
+                    }
+                    Some(s.to_string())
+                });
                 let target_date = if let Some(line_date) = extract_date(line, ref_dt) {
                     line_date
                 } else if let Some(d) = &days_opt {
@@ -946,20 +1150,118 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
     let extracted_times = extract_times(ocr_text);
 
     let day_pattern_re = Regex::new(r"(?i)\b((?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun))*)\b").unwrap();
-    let (weekday_days_opt, single_recurrence_rule) = if extracted_date.is_none() {
-        if let Some(dm) = day_pattern_re.find(ocr_text) {
-            let days_str = dm.as_str().trim();
-            let bydays = parse_weekdays_to_byday(days_str);
-            if !bydays.is_empty() {
-                let first_day = days_str.split(',').next().map(|s| s.trim()).unwrap_or(days_str);
-                let rrule = RecurrenceRule::new_weekly(bydays, None).to_rrule_string();
-                (Some(first_day.to_string()), Some(rrule))
-            } else {
-                (None, None)
+    let course_code_re = Regex::new(r"^[A-Z]{2,6}[-\s]\d{3,4}").unwrap();
+    let time_range_re = Regex::new(r"(?i)\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))\b").unwrap();
+
+    // Find valid weekday pattern in context (gated by time line, course code, or explicit repeat keywords)
+    let mut matched_days_str: Option<String> = None;
+    let mut is_on_time_line = false;
+
+    // A. Check line with time range or time pattern
+    for line in &lines {
+        if time_range_re.is_match(line) || is_time_pattern(line) {
+            if let Some(dm) = day_pattern_re.find(line) {
+                let s = dm.as_str().trim();
+                let bydays = parse_weekdays_to_byday(s);
+                let lower = s.to_lowercase();
+                let is_ambiguous = (lower == "we" || lower == "sun" || lower == "sat" || lower == "mon" || lower == "th")
+                    && line.split_whitespace().count() > 4
+                    && bydays.len() == 1;
+                if !is_ambiguous && !bydays.is_empty() {
+                    matched_days_str = Some(s.to_string());
+                    is_on_time_line = true;
+                    break;
+                }
             }
-        } else {
-            (None, None)
         }
+    }
+
+    // B. Check lines with explicit schedule context / course codes / repeat keywords
+    if matched_days_str.is_none() {
+        for line in &lines {
+            let l_lower = line.to_lowercase();
+            let is_schedule_context = course_code_re.is_match(line)
+                || l_lower.contains("days")
+                || l_lower.contains("schedule")
+                || l_lower.contains("every")
+                || l_lower.contains("weekly")
+                || l_lower.contains("repeats")
+                || l_lower.contains("recurring")
+                || l_lower.contains("starts")
+                || l_lower.contains("faculty:")
+                || l_lower.contains("units:");
+            if is_schedule_context {
+                if let Some(dm) = day_pattern_re.find(line) {
+                    let s = dm.as_str().trim();
+                    let bydays = parse_weekdays_to_byday(s);
+                    if !bydays.is_empty() {
+                        matched_days_str = Some(s.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // C. Check multi-day pattern anywhere in ocr_text (e.g. "Mo, We")
+    if matched_days_str.is_none() {
+        for m in day_pattern_re.find_iter(ocr_text) {
+            let candidate = m.as_str().trim();
+            let bydays = parse_weekdays_to_byday(candidate);
+            if bydays.len() >= 2 {
+                matched_days_str = Some(candidate.to_string());
+                break;
+            }
+        }
+    }
+
+    // D. If date is absent, check short non-prose lines with day names
+    if matched_days_str.is_none() && extracted_date.is_none() {
+        for line in &lines {
+            let t = line.trim();
+            if let Some(dm) = day_pattern_re.find(t) {
+                let s = dm.as_str().trim();
+                let bydays = parse_weekdays_to_byday(s);
+                let lower = s.to_lowercase();
+                let is_ambiguous = (lower == "we" || lower == "sun" || lower == "sat" || lower == "mon" || lower == "th") && t.split_whitespace().count() > 3;
+                if !bydays.is_empty() && !is_ambiguous && (t.len() <= 25 || s.len() >= 4) {
+                    matched_days_str = Some(s.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    let (weekday_days_opt, single_recurrence_rule) = if let Some(days_str) = matched_days_str {
+        let bydays = parse_weekdays_to_byday(&days_str);
+        let first_day = days_str.split(',').next().map(|s| s.trim()).unwrap_or(&days_str).to_string();
+
+        let text_lower = ocr_text.to_lowercase();
+        let has_explicit_repeat = text_lower.contains("every")
+            || text_lower.contains("weekly")
+            || text_lower.contains("repeats")
+            || text_lower.contains("recurring")
+            || bydays.len() >= 2;
+
+        let has_course_code = lines.iter().any(|l| course_code_re.is_match(l));
+        let has_academic_context = has_course_code
+            || text_lower.contains("faculty:")
+            || text_lower.contains("units:")
+            || text_lower.contains("in cart")
+            || text_lower.contains("cross-listed");
+
+        let is_recurring = if extracted_date.is_some() {
+            has_explicit_repeat || (has_course_code && (text_lower.contains("starts") || text_lower.contains("begins") || bydays.len() >= 2))
+        } else {
+            has_explicit_repeat || has_academic_context || (is_on_time_line && !bydays.is_empty())
+        };
+        let rrule = if is_recurring && !bydays.is_empty() {
+            Some(RecurrenceRule::new_weekly(bydays, None).to_rrule_string())
+        } else {
+            None
+        };
+
+        (Some(first_day), rrule)
     } else {
         (None, None)
     };
@@ -1189,8 +1491,8 @@ fn extract_date(text: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> 
         }
     }
 
-    // Pattern 3: Numeric date MM/DD/YYYY, MM/DD/YY, MM.DD.YY, MM.DD.YYYY, YYYY-MM-DD, YYYY.MM.DD
-    let numeric_regex = Regex::new(r"\b(\d{4})[/\.-](\d{1,2})[/\.-](\d{1,2})\b|\b(\d{1,2})[/\.](\d{1,2})[/\.](\d{2,4})\b").unwrap();
+    // Pattern 3: Numeric date YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY, MM.DD.YY, or MM/DD (e.g. "9/10", "THURS. 9/10")
+    let numeric_regex = Regex::new(r"(?i)\b(\d{4})[/\.-](\d{1,2})[/\.-](\d{1,2})\b|\b(?:(mon|tue|wed|thu|fri|sat|sun)[a-z.]*\s*,?\s*)?(\d{1,2})[/\.](\d{1,2})(?:[/\.](\d{2,4}))?\b").unwrap();
     if let Some(caps) = numeric_regex.captures(&clean_text) {
         if let (Some(y), Some(m), Some(d)) = (caps.get(1), caps.get(2), caps.get(3)) {
             let year: i32 = y.as_str().parse().ok()?;
@@ -1199,19 +1501,26 @@ fn extract_date(text: &str, ref_dt: DateTime<FixedOffset>) -> Option<NaiveDate> 
             if let Some(res) = NaiveDate::from_ymd_opt(year, month, day) {
                 return Some(res);
             }
-        } else if let (Some(m), Some(d), Some(y)) = (caps.get(4), caps.get(5), caps.get(6)) {
-            let month: u32 = m.as_str().parse().ok()?;
-            let day: u32 = d.as_str().parse().ok()?;
-            let mut year: i32 = y.as_str().parse().ok()?;
-            if year < 100 {
-                year += 2000;
-            }
-            if let Some(res) = NaiveDate::from_ymd_opt(year, month, day) {
-                return Some(res);
+        } else if let (Some(m_cap), Some(d_cap)) = (caps.get(5), caps.get(6)) {
+            let month: u32 = m_cap.as_str().parse().ok()?;
+            let day: u32 = d_cap.as_str().parse().ok()?;
+            let weekday_opt = caps.get(4).and_then(|w| weekday_to_num(w.as_str()));
+            if (1..=12).contains(&month) && (1..=31).contains(&day) {
+                let year = if let Some(y_cap) = caps.get(7) {
+                    let mut y: i32 = y_cap.as_str().parse().ok()?;
+                    if y < 100 {
+                        y += 2000;
+                    }
+                    y
+                } else {
+                    resolve_year(month, day, weekday_opt, ref_dt)
+                };
+                if let Some(res) = NaiveDate::from_ymd_opt(year, month, day) {
+                    return Some(res);
+                }
             }
         }
     }
-
     None
 }
 
@@ -1317,6 +1626,8 @@ fn extract_times(text: &str) -> Option<(NaiveTime, Option<NaiveTime>)> {
 fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
     // 1. Explicit marker: "This year at ...", "Location: ...", "Venue: ...", "Where: ..."
     let explicit_marker_regex = Regex::new(r"(?i)(?:this year at|held at|venue:|location:|where:|place:|live at|takes place at)\s*(.*)").unwrap();
+    let continuation_token_re = Regex::new(r"(?i)\b(?:st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|way|lane|ln|ct|court|pl|plaza|pkwy|parkway|park|room|hall|building|center|centre|auditorium|and)\b").unwrap();
+
     for (i, line) in lines.iter().enumerate() {
         if let Some(caps) = explicit_marker_regex.captures(line) {
             let mut loc = caps.get(1).unwrap().as_str().trim().to_string();
@@ -1331,13 +1642,8 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
                 if next_line.starts_with('*') || next_line.starts_with('-') || next_line.len() > 60 {
                     break;
                 }
-                let lower = next_line.to_lowercase();
-                if lower.contains("street") || lower.contains("st") || lower.contains("ave")
-                    || lower.contains("park") || lower.contains("skilton") || lower.contains("blvd")
-                    || lower.contains("road") || lower.contains("room") || lower.contains("and ") {
-                    if !loc.contains(next_line) {
-                        loc = format!("{}, {}", loc, next_line);
-                    }
+                if continuation_token_re.is_match(next_line) && !loc.contains(next_line) {
+                    loc = format!("{}, {}", loc, next_line);
                 }
                 extra_idx += 1;
             }
@@ -1349,17 +1655,15 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
         }
     }
 
-    // 2. Scan for address / venue keywords in lines
-    let venue_keywords = [
-        "PARK", "SQUARE", "HALL", "CENTER", "CENTRE", "AUDITORIUM", "BALLROOM", "STREET", "ST.",
-        "AVENUE", "AVE", "BOULEVARD", "BLVD", "ROAD", "RD", "DRIVE", "DR", "PLAZA",
-        "ROOM", "CLUB", "THEATRE", "THEATER", "BAR", "GRILL", "CAFE", "BREWERY",
-        "CHURCH", "LIBRARY", "MUSEUM", "GARDEN", "GARDENS", "STADIUM", "ARENA",
-        "FIELD", "HOUSE", "LOUNGE", "HQ", "CAMPUS", "HUB", "STUDIO", "BUILDING",
-        "TOWER", "GALLERY", "SPACE", "OFFICE", "PAVILION", "COMMONS", "HOTEL", "LAWN",
-        "RESTAURANT", "TAVERN", "PUB", "AMPHITHEATER", "STAGE", "ZOOM", "GOOGLE MEET", "TEAMS", "WEBEX", "DISCORD",
-        "BOSTON", "SOMERVILLE", "CAMBRIDGE", "BROOKLINE", "MEDFORD", "NEW YORK", "NYC",
-    ];
+    // 2. Structural & keyword candidate scoring for venue / room / address lines
+    let strong_venue_re = Regex::new(r"(?i)\b(?:park|square|hall|center|centre|auditorium|ballroom|plaza|room|club|theatre|theater|bar|grill|cafe|brewery|church|library|museum|garden|gardens|stadium|arena|field|house|lounge|hq|studio|building|bldg|tower|gallery|pavilion|lawn|tavern|pub|amphitheater|stage|zoom|teams|webex|discord)\b").unwrap();
+    let street_suffix_re = Regex::new(r"(?i)\b(?:street|st\.?|avenue|ave\.?|boulevard|blvd\.?|road|rd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|highway|hwy\.?|parkway|pkwy\.?)\b").unwrap();
+    let city_state_re = Regex::new(r"\b[A-Z][a-zA-Z\s]+,\s*[A-Z]{2}\b").unwrap();
+    let room_pattern_re = Regex::new(r"(?i)\b(?:room|suite|ste|rm|bldg|building|hall|wing|apt)\.?\s+[A-Za-z0-9#-]+|\b\d{1,4}[A-Z]?\b").unwrap();
+    let known_cities = ["BOSTON", "SOMERVILLE", "CAMBRIDGE", "BROOKLINE", "MEDFORD", "NEW YORK", "NYC"];
+
+    let mut candidate_locations: Vec<(String, usize, i32)> = Vec::new();
+
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         let upper = trimmed.to_uppercase();
@@ -1368,43 +1672,74 @@ fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || upper.contains("FOR ADA") || upper.contains("ACCOMMODATIONS") || upper.contains("311")
             || upper.contains("RAIN DATE") || upper.contains("ART BY:") || upper.len() < 3
-            || is_date_or_time_line(&upper) {
+            || is_date_or_time_line(&upper) || is_noise_or_metadata_line(trimmed) {
             continue;
         }
 
-        // Check if this line contains a venue keyword (handling both multi-word phrases and word boundaries)
-        let has_venue_kw = venue_keywords.iter().any(|&kw| {
-            if kw.contains(' ') {
-                upper.contains(kw)
-            } else {
-                let clean_kw = kw.trim_end_matches('.');
-                upper.split_whitespace().any(|word| {
-                    let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric());
-                    cleaned == kw || cleaned == clean_kw
-                })
-            }
-        });
-        if has_venue_kw {
-            let mut loc = trimmed.to_string();
-            if i + 1 < lines.len() {
-                let next = lines[i + 1].trim();
-                let next_upper = next.to_uppercase();
-                let is_addr_or_city = next_upper.split_whitespace().any(|word| {
-                    let c = word.trim_matches(|c: char| !c.is_alphanumeric());
-                    c == "STREET" || c == "AVE" || c == "AVENUE" || c == "ST" || c == "ROAD" || c == "RD"
-                        || c == "ROOM" || c == "BLVD" || c == "WAY" || c == "LANE" || c == "LN"
-                        || c == "HIGHWAY" || c == "HWY" || c == "DRIVE" || c == "DR"
-                }) || (next_upper.contains(',') && !next_upper.contains("INVITE") && !next_upper.contains("WE "));
-                if is_addr_or_city && !next.starts_with('*') && !is_date_or_time_line(&next_upper) && !is_noise_or_metadata_line(next)
-                    && !next_upper.contains("INVITE") && !next_upper.contains("DESSERT") && !next_upper.contains("WE ") {
-                    loc = format!("{}, {}", loc, next);
-                }
-            }
-            let cleaned = clean_location_string(&loc);
-            if !cleaned.is_empty() {
-                return Some(cleaned);
+        let has_strong_venue = strong_venue_re.is_match(trimmed);
+        let has_street_suffix = street_suffix_re.is_match(trimmed);
+        let has_city_state = city_state_re.is_match(trimmed) || known_cities.iter().any(|&c| upper.contains(c));
+        let has_room = room_pattern_re.is_match(trimmed);
+
+        if !has_strong_venue && !has_street_suffix && !has_city_state && !has_room {
+            continue;
+        }
+
+        let mut score: i32 = 0;
+        if has_strong_venue {
+            score += 30;
+        }
+        if has_room {
+            score += 30;
+        }
+        if has_street_suffix {
+            score += 25;
+        }
+        if has_city_state {
+            score += 25;
+        }
+
+        // Boost if immediately following a date or time line
+        if i > 0 && is_date_or_time_line(lines[i - 1]) {
+            score += 30;
+        }
+
+        // Penalize top header lines (idx 0 or 1) that are all-caps or end with a colon (e.g. "CAMPUS AS COMMONS:" or "SOMERSTREETS")
+        if i <= 1 && (trimmed.ends_with(':') || (!has_room && !has_street_suffix && !city_state_re.is_match(trimmed))) {
+            score -= 40;
+        }
+
+        let mut loc = trimmed.to_string();
+
+        // Check if next line is an address, room, or city continuation
+        if i + 1 < lines.len() {
+            let next = lines[i + 1].trim();
+            let next_upper = next.to_uppercase();
+            let is_next_location_part = street_suffix_re.is_match(next)
+                || city_state_re.is_match(next)
+                || room_pattern_re.is_match(next)
+                || known_cities.iter().any(|&c| next_upper.contains(c))
+                || (next_upper.contains(',') && !next_upper.contains("INVITE") && !next_upper.contains("WE "));
+
+            if is_next_location_part
+                && !next.starts_with('*')
+                && !is_date_or_time_line(&next_upper)
+                && !is_noise_or_metadata_line(next)
+                && !next_upper.contains("INVITE")
+                && !next_upper.contains("DESSERT") {
+                loc = format!("{}, {}", loc, next);
+                score += 20;
             }
         }
+
+        let cleaned = clean_location_string(&loc);
+        if !cleaned.is_empty() {
+            candidate_locations.push((cleaned, i, score));
+        }
+    }
+
+    if let Some((best_loc, _, _)) = candidate_locations.into_iter().max_by_key(|item| item.2) {
+        return Some(best_loc);
     }
 
     None
@@ -1449,7 +1784,9 @@ fn is_noise_or_metadata_line(s: &str) -> bool {
     if lower == "follow" || lower == "following" || lower == "followers"
         || lower.starts_with("liked by ") || lower.ends_with("days ago")
         || lower.ends_with("hours ago") || lower.ends_with("mins ago")
-        || lower == "more" || lower == "less" {
+        || lower == "more" || lower == "less"
+        || lower.ends_with("... more") || lower.ends_with("… more") || lower.ends_with(" more")
+        || lower.ends_with("...more") || lower.ends_with("…more") {
         return true;
     }
     if (lower.contains("accommodations") || lower.contains("interpreter") || lower.contains("contact")) && lower.contains("311") {
@@ -1570,13 +1907,16 @@ fn extract_title(lines: &[&str], _full_text: &str) -> String {
                 }
                 let combined = format!("{} {}", fixed_prev, trimmed);
                 candidate_titles.push((combined, 0, score + 40));
-            } else if prev == prev_upper
-                && !prev.starts_with('*') && !prev.starts_with('-') && !prev.ends_with(':')
-                && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev)
-                && !supporting_indices.contains(&(idx - 1))
-                && prev.len() > 3 && prev.len() < 30 {
-                let combined = format!("{}: {}", prev, trimmed);
-                candidate_titles.push((combined, idx, score + 10));
+            } else {
+                let prev_clean = prev.trim_end_matches(':');
+                if (prev == prev_upper || prev.ends_with(':'))
+                    && !prev.starts_with('*') && !prev.starts_with('-')
+                    && !is_noise_or_metadata_line(prev) && !is_date_or_time_line(prev)
+                    && !supporting_indices.contains(&(idx - 1))
+                    && prev_clean.len() > 3 && prev_clean.len() < 40 {
+                    let combined = format!("{}: {}", prev_clean, trimmed);
+                    candidate_titles.push((combined, idx, score + 15));
+                }
             }
         }
 
@@ -1605,7 +1945,25 @@ fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> O
     let title_upper = title.to_uppercase();
     let loc_upper = location.map(|l| l.to_uppercase()).unwrap_or_default();
 
-    for &line in lines {
+    // Structural prefix markers (bullet lists, key-value notes, announcements)
+    let note_prefix_re = Regex::new(r"(?i)^(?:rain date|note|info|details|rsvp|featuring|special guests?|doors|remote viewers|faculty|bio|about|admission|all ages|free admission):?\s*|\b(?:rain date)\b").unwrap();
+    let slogan_re = Regex::new(r"\b[A-Z]{3,}\.\s+[A-Z]{3,}\.").unwrap();
+
+    // Preprocess lines: merge lines ending with connectors (&, +, /, ,)
+    let mut merged_lines: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let mut curr = lines[i].trim().to_string();
+        while (curr.ends_with('&') || curr.ends_with('+') || curr.ends_with('/') || curr.ends_with(',')) && i + 1 < lines.len() {
+            i += 1;
+            curr.push(' ');
+            curr.push_str(lines[i].trim());
+        }
+        merged_lines.push(curr);
+        i += 1;
+    }
+
+    for line in &merged_lines {
         let trimmed = line.trim();
         let upper = trimmed.to_uppercase();
 
@@ -1613,32 +1971,55 @@ fn extract_description(lines: &[&str], title: &str, location: Option<&str>) -> O
         if title_upper.contains(&upper) || (!loc_upper.is_empty() && loc_upper.contains(&upper)) {
             continue;
         }
-        if is_noise_or_metadata_line(trimmed) || (!upper.contains("RAIN DATE") && is_date_or_time_line(trimmed)) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 4 {
-            continue;
-        }
-        if trimmed.starts_with('@') || trimmed.contains("tufts_uep") || upper.starts_with("LIKED BY") || upper.contains("DAYS AGO") {
+        if is_noise_or_metadata_line(trimmed) || (!note_prefix_re.is_match(trimmed) && is_date_or_time_line(trimmed)) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 3 {
             continue;
         }
 
-        // Keep bullet points, activity highlights, rain dates, special notes, tour info, mottos, rallies
-        if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
-            || upper.contains("LIVE MUSIC") || upper.contains("PERFORMANCES") || upper.contains("BEER GARDEN")
-            || upper.contains("FOOD VENDORS") || upper.contains("ARTISTS") || upper.contains("ACTIVITIES")
-            || upper.contains("RAIN DATE") || upper.contains("FREE ADMISSION") || upper.contains("ALL AGES")
-            || upper.contains("SPEAKERS") || upper.contains("PIZZA") || upper.contains("DRINKS")
-            || upper.contains("TOUR") || upper.contains("DOORS") || upper.contains("SPECIAL GUEST")
-            || upper.contains("RIDE.") || upper.contains("WALK.") || upper.contains("RALLY")
-            || upper.contains("STREETS EXIST") || upper.contains("EVERYONE") || upper.contains("MEMORIAL") {
-            let clean_bullet = trimmed.trim_start_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
+        // Structural check 1: List items starting with bullet markers
+        let is_bullet = trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•') || trimmed.starts_with('+');
+        if is_bullet {
+            let clean_bullet = trimmed.trim_start_matches(|c: char| c == '*' || c == '-' || c == '•' || c == '+').trim();
             if !clean_bullet.is_empty() && !bullet_points.iter().any(|b| b == clean_bullet) {
                 bullet_points.push(clean_bullet.to_string());
             }
-        } else if upper.contains("INVITE") || upper.contains("DESSERT") || upper.contains("ICE CREAM")
-            || upper.contains("COFFEE") || upper.contains("TEA") || upper.contains("FRUIT")
-            || upper.contains("JOIN US") || upper.contains("WELCOME") || upper.contains("REFRESHMENT") {
+            continue;
+        }
+
+        // Structural check 2: Explicit note / annotation lines (e.g. Rain Date, Remote viewers, Faculty)
+        if note_prefix_re.is_match(trimmed) {
+            let clean = trimmed.trim_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
+            if !clean.is_empty() && !bullet_points.iter().any(|b| b == clean) {
+                bullet_points.push(clean.to_string());
+            }
+            continue;
+        }
+
+        // Structural check 3: Slogans / punctuated uppercase phrases (e.g. "RIDE. WALK. RALLY.", "OUR STREETS EXIST For EVERYONE", "LIVE MUSIC & PERFORMANCES")
+        if slogan_re.is_match(trimmed) || (upper == trimmed && trimmed.len() >= 10 && (trimmed.contains(' ') || trimmed.contains('&') || trimmed.contains('.'))) {
+            let clean = trimmed.trim_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
+            if !clean.is_empty() && !bullet_points.iter().any(|b| b == clean) {
+                bullet_points.push(clean.to_string());
+            }
+            continue;
+        }
+        // Structural check 4: Tour / subtitle / event classification line (e.g. "2026 TOUR")
+        let tour_subtitle_re = Regex::new(r"(?i)\b(?:tour|summit|conference|symposium|workshop|webinar|expo|exhibition|series|session|festival)\b").unwrap();
+        if tour_subtitle_re.is_match(trimmed) {
+            let clean = trimmed.trim_matches(|c: char| c == '*' || c == '-' || c == '•').trim();
+            if !clean.is_empty() && !bullet_points.iter().any(|b| b == clean) {
+                bullet_points.push(clean.to_string());
+            }
+            continue;
+        }
+
+        // Structural check 5: Prose / sentence content (contains punctuation or conversational sentence flow)
+        let has_sentence_punctuation = trimmed.contains('.') || trimmed.contains('!') || trimmed.contains('?') || trimmed.contains(',');
+        let word_count = trimmed.split_whitespace().count();
+        if (has_sentence_punctuation && word_count >= 3) || word_count >= 5 {
             prose_lines.push(trimmed.to_string());
         }
     }
+
     if !bullet_points.is_empty() {
         Some(bullet_points.join(" • "))
     } else if !prose_lines.is_empty() {
@@ -1906,6 +2287,56 @@ MIT Stata Center, Room 32-123
         let prompt = generate_extraction_prompt("Concert tomorrow at 8pm", &ctx);
         assert!(prompt.contains("Reference Time: 2026-09-06T10:57:00-04:00 (Sunday)"));
         assert!(prompt.contains("Concert tomorrow at 8pm"));
+    }
+
+    #[test]
+    fn test_adaptive_prompt_trimming_preserves_high_signal_lines() {
+        let ctx = sample_reference_context();
+        // Build a massive OCR text with noise lines, social handles, long filler, and important event info
+        let mut lines = vec![
+            "CAMPUS FESTIVAL 2026",
+            "Saturday, September 19, 2026",
+            "12:00 PM - 6:00 PM",
+            "Academic Quad, Student Center Room 204",
+            "follow",
+            "liked by user123 and 45 others",
+            "@campuslife_official",
+            "https://example.com/tickets/long/url/path",
+            "---",
+        ];
+        for i in 0..100 {
+            lines.push(match i % 3 {
+                0 => "Random background sponsor boilerplate with low signal text description",
+                1 => "Some additional arbitrary filler line repeating general notices",
+                _ => "UI noise artifact 12345 67890",
+            });
+        }
+        lines.push("* Free food and live music performances");
+        let raw_ocr = lines.join("\n");
+        let prompt = generate_extraction_prompt(&raw_ocr, &ctx);
+
+        // The prompt must stay within budget
+        assert!(estimate_token_count(&prompt) <= MAX_PROMPT_TOKENS);
+        // High-signal items must be preserved
+        assert!(prompt.contains("CAMPUS FESTIVAL"));
+        assert!(prompt.contains("September 19, 2026"));
+        assert!(prompt.contains("12:00 PM - 6:00 PM"));
+        assert!(prompt.contains("Academic Quad"));
+        // Low-signal noise must be dropped
+        assert!(!prompt.contains("@campuslife_official"));
+        assert!(!prompt.contains("liked by user123"));
+    }
+
+    #[test]
+    fn test_token_estimation_and_single_line_truncation() {
+        assert_eq!(estimate_token_count(""), 0);
+        assert_eq!(estimate_token_count("   "), 0);
+        assert!(estimate_token_count("Hello world") > 0);
+
+        let long_line = "A".repeat(5000);
+        let trimmed = trim_ocr_text_to_budget(&long_line, 100);
+        assert!(estimate_token_count(&trimmed) <= 120);
+        assert!(trimmed.ends_with("..."));
     }
 
     #[test]
@@ -2267,5 +2698,71 @@ OUR STREETS EXIST For EVERYONE"#;
             desc
         );
         assert_eq!(event.recurrence_rule, None);
+    }
+    #[test]
+    fn test_get_weekday_date_tight_comparison() {
+        // Tuesday Sep 8, 2026 reference
+        let tuesday_ref = DateTime::parse_from_rfc3339("2026-09-08T12:00:00-04:00").unwrap();
+
+        // Monday should resolve to next Monday (Sep 14, 2026), NOT yesterday (Sep 7, 2026)
+        let monday = get_weekday_date("monday", tuesday_ref).unwrap();
+        assert_eq!(monday, NaiveDate::from_ymd_opt(2026, 9, 14).unwrap());
+
+        // Wednesday should resolve to tomorrow (Sep 9, 2026)
+        let wednesday = get_weekday_date("wed", tuesday_ref).unwrap();
+        assert_eq!(wednesday, NaiveDate::from_ymd_opt(2026, 9, 9).unwrap());
+    }
+
+    #[test]
+    fn test_parse_recurring_card_with_explicit_date_and_weekdays() {
+        let text = "CS 101 Intro to Computer Science\nStarts Sep 8 · Mo, We 1:20 PM - 4:20 PM\nScience Center 105";
+        let ctx = sample_reference_context(); // Reference Sunday 2026-09-06
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert!(event.title.contains("CS 101"));
+        assert_eq!(event.start_time.as_deref(), Some("2026-09-08T13:20:00-04:00"));
+        assert_eq!(event.end_time.as_deref(), Some("2026-09-08T16:20:00-04:00"));
+        assert_eq!(event.recurrence_rule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO,WE"));
+    }
+
+    #[test]
+    fn test_parse_commons_flyer_deterministic() {
+        let ocr_text = r#"CAMPUS AS COMMONS:
+Agroforestry and Shared Stewardship at Tufts
+Mary Mattingly
+Visiting Artist, Center for the Humanities at Tufts
+Luits
+UNIVERSITY
+School of Arts and Sciences
+Environmental Studies
+Hoch Cunningham Environmental Lectures
+Architectural Studies Program
+Center for the Humanities at Tufts, University Ecologies
+THURS. 9/10, 12-1PM
+Curtis Hall Multipurpose Room
+Remote viewers: go.tufts.edu/HOCU0910"#;
+
+        let ctx = sample_reference_context(); // Reference 2026-09-06
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        assert!(event.title.contains("CAMPUS AS COMMONS") && event.title.contains("Agroforestry"));
+        assert_eq!(event.start_time.as_deref(), Some("2026-09-10T12:00:00-04:00"));
+        assert_eq!(event.end_time.as_deref(), Some("2026-09-10T13:00:00-04:00"));
+        assert!(!event.is_all_day);
+        assert_eq!(event.location.as_deref(), Some("Curtis Hall Multipurpose Room"));
+        assert!(event.description.is_some());
+        let desc = event.description.unwrap();
+        assert!(desc.contains("Mary Mattingly") || desc.contains("Remote viewers"));
+        assert_eq!(event.recurrence_rule, None, "One-off lecture flyer should not have recurrence");
+    }
+
+    #[test]
+    fn test_day_matching_gated_against_prose() {
+        let text = "Join Us for Autumn Celebration\nFriday, September 11, 2026\n7:00 PM - 10:00 PM\nLincoln Center\nWe invite all friends and family to join us on this special day. We will have food and games!";
+        let ctx = sample_reference_context();
+        let event = parse_event_deterministic(text, &ctx);
+
+        assert_eq!(event.start_time.as_deref(), Some("2026-09-11T19:00:00-04:00"));
+        assert_eq!(event.recurrence_rule, None, "Prose containing 'We' should not fabricate recurrence rule");
     }
 }
