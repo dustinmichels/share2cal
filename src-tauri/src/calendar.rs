@@ -1,7 +1,7 @@
+use crate::error::AppError;
 use crate::parser::EventDetails;
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CalendarInfo {
     pub id: String,
@@ -54,9 +54,10 @@ pub fn parse_date_to_epoch(date_str: &str) -> Option<f64> {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
-    use super::{parse_date_to_epoch, CalendarInfo, EventDetails};
+    use super::{parse_date_to_epoch, AppError, CalendarInfo, EventDetails};
+    use crate::ffi::NativeStringGuard;
     use chrono::Local;
-    use std::ffi::{CStr, CString};
+    use std::ffi::CString;
     use std::os::raw::{c_char, c_double, c_int};
 
     extern "C" {
@@ -93,77 +94,63 @@ mod apple {
         fn calendar_apple_free_string(ptr: *mut c_char);
     }
 
-    struct AutoCString(*mut c_char);
-
-    impl Drop for AutoCString {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    calendar_apple_free_string(self.0);
-                }
-            }
-        }
-    }
-
-    pub fn check_permission() -> Result<String, String> {
+    pub fn check_permission() -> Result<String, AppError> {
         let mut out_status: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
 
         let code = unsafe { calendar_apple_check_permission(&mut out_status, &mut out_error) };
-        let _status_guard = AutoCString(out_status);
-        let _error_guard = AutoCString(out_error);
+        let guard_status = NativeStringGuard::new(out_status, calendar_apple_free_string);
+        let guard_error = NativeStringGuard::new(out_error, calendar_apple_free_string);
 
-        if code != 0 || out_status.is_null() {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Failed to check calendar permission.".to_string()
-            };
-            return Err(err_msg);
+        if code != 0 || guard_status.is_null() {
+            let err_msg = guard_error
+                .to_string_lossy()
+                .unwrap_or_else(|| "Failed to check calendar permission.".to_string());
+            return Err(AppError::Calendar(err_msg));
         }
 
-        let status = unsafe { CStr::from_ptr(out_status).to_string_lossy().into_owned() };
+        let status = guard_status
+            .to_string_lossy()
+            .ok_or_else(|| AppError::Calendar("Permission status is null.".to_string()))?;
         Ok(status)
     }
 
-    pub fn request_permission() -> Result<bool, String> {
+    pub fn request_permission() -> Result<bool, AppError> {
         let mut out_granted: c_int = 0;
         let mut out_error: *mut c_char = std::ptr::null_mut();
 
         let code = unsafe { calendar_apple_request_permission(&mut out_granted, &mut out_error) };
-        let _error_guard = AutoCString(out_error);
+        let guard_error = NativeStringGuard::new(out_error, calendar_apple_free_string);
 
         if code != 0 {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Failed to request calendar permission.".to_string()
-            };
-            return Err(err_msg);
+            let err_msg = guard_error
+                .to_string_lossy()
+                .unwrap_or_else(|| "Failed to request calendar permission.".to_string());
+            return Err(AppError::Calendar(err_msg));
         }
 
         Ok(out_granted == 1)
     }
 
-    pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {
+    pub fn list_calendars() -> Result<Vec<CalendarInfo>, AppError> {
         let mut out_json: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
 
         let code = unsafe { calendar_apple_list_calendars(&mut out_json, &mut out_error) };
-        let _json_guard = AutoCString(out_json);
-        let _error_guard = AutoCString(out_error);
+        let guard_json = NativeStringGuard::new(out_json, calendar_apple_free_string);
+        let guard_error = NativeStringGuard::new(out_error, calendar_apple_free_string);
 
-        if code != 0 || out_json.is_null() {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Failed to retrieve available calendars.".to_string()
-            };
-            return Err(err_msg);
+        if code != 0 || guard_json.is_null() {
+            let err_msg = guard_error
+                .to_string_lossy()
+                .unwrap_or_else(|| "Failed to retrieve available calendars.".to_string());
+            return Err(AppError::Calendar(err_msg));
         }
 
-        let json_str = unsafe { CStr::from_ptr(out_json).to_string_lossy() };
-        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse calendar list: {}", e))
+        let json_str = guard_json
+            .to_string_lossy()
+            .ok_or_else(|| AppError::Calendar("Calendar list JSON is null.".to_string()))?;
+        serde_json::from_str(&json_str).map_err(|e| AppError::Calendar(format!("Failed to parse calendar list: {}", e)))
     }
 
     pub fn create_event(
@@ -171,13 +158,13 @@ mod apple {
         calendar_id: Option<&str>,
         calendar_title: Option<&str>,
         calendar_source_title: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, AppError> {
         let trimmed_title = event.title.trim();
         if trimmed_title.is_empty() {
-            return Err("Event title cannot be empty.".to_string());
+            return Err(AppError::Calendar("Event title cannot be empty.".to_string()));
         }
 
-        let title_c = CString::new(trimmed_title).map_err(|e| e.to_string())?;
+        let title_c = CString::new(trimmed_title).map_err(|e| AppError::Calendar(e.to_string()))?;
 
         // Calculate start epoch
         let start_epoch = match event.start_time.as_deref().and_then(parse_date_to_epoch) {
@@ -203,12 +190,12 @@ mod apple {
         let is_all_day_c: c_int = if event.is_all_day { 1 } else { 0 };
 
         let location_c = match event.location.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
 
         let notes_c = match event.description.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
         let url_c: Option<CString> = None; // Reserved for URL if extended
@@ -216,25 +203,25 @@ mod apple {
         let recurrence_rule_c = match event.recurrence_rule.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => {
                 let parsed = crate::parser::RecurrenceRule::parse_rrule(s)
-                    .map_err(|e| format!("Invalid recurrence rule: {}", e))?;
+                    .map_err(|e| AppError::Calendar(format!("Invalid recurrence rule: {}", e)))?;
                 let normalized = parsed.to_rrule_string();
-                Some(CString::new(normalized).map_err(|e| e.to_string())?)
+                Some(CString::new(normalized).map_err(|e| AppError::Calendar(e.to_string()))?)
             }
             None => None,
         };
 
         let calendar_id_c = match calendar_id.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
 
         let calendar_title_c = match calendar_title.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
 
         let calendar_source_title_c = match calendar_source_title.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(CString::new(s).map_err(|e| e.to_string())?),
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
 
@@ -258,36 +245,36 @@ mod apple {
             )
         };
 
-        let _event_id_guard = AutoCString(out_event_id);
-        let _error_guard = AutoCString(out_error);
+        let guard_event_id = NativeStringGuard::new(out_event_id, calendar_apple_free_string);
+        let guard_error = NativeStringGuard::new(out_error, calendar_apple_free_string);
 
-        if code != 0 || out_event_id.is_null() {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Failed to create event in calendar.".to_string()
-            };
-            return Err(err_msg);
+        if code != 0 || guard_event_id.is_null() {
+            let err_msg = guard_error
+                .to_string_lossy()
+                .unwrap_or_else(|| "Failed to create event in calendar.".to_string());
+            return Err(AppError::Calendar(err_msg));
         }
 
-        let event_id = unsafe { CStr::from_ptr(out_event_id).to_string_lossy().into_owned() };
+        let event_id = guard_event_id
+            .to_string_lossy()
+            .ok_or_else(|| AppError::Calendar("Event ID is null.".to_string()))?;
         Ok(event_id)
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod fallback {
-    use super::{CalendarInfo, EventDetails};
+    use super::{AppError, CalendarInfo, EventDetails};
 
-    pub fn check_permission() -> Result<String, String> {
+    pub fn check_permission() -> Result<String, AppError> {
         Ok("authorized".to_string())
     }
 
-    pub fn request_permission() -> Result<bool, String> {
+    pub fn request_permission() -> Result<bool, AppError> {
         Ok(true)
     }
 
-    pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {
+    pub fn list_calendars() -> Result<Vec<CalendarInfo>, AppError> {
         Ok(vec![
             CalendarInfo {
                 id: "default".to_string(),
@@ -313,9 +300,9 @@ mod fallback {
         _calendar_id: Option<&str>,
         _calendar_title: Option<&str>,
         _calendar_source_title: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, AppError> {
         if event.title.trim().is_empty() {
-            return Err("Event title cannot be empty.".to_string());
+            return Err(AppError::Calendar("Event title cannot be empty.".to_string()));
         }
         Ok(format!("mock_event_{}", event.title.trim()))
     }
@@ -333,7 +320,7 @@ pub fn create_events(
     calendar_id: Option<&str>,
     calendar_title: Option<&str>,
     calendar_source_title: Option<&str>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AppError> {
     let mut event_ids = Vec::new();
     for event in events {
         let id = create_event(event, calendar_id, calendar_title, calendar_source_title)?;

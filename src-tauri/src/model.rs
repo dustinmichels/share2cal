@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -88,16 +89,16 @@ impl Default for DownloadState {
     }
 }
 
-pub fn get_manifest() -> Result<ModelManifest, String> {
-    serde_json::from_str(MANIFEST_JSON).map_err(|e| format!("Failed to parse model manifest: {}", e))
+pub fn get_manifest() -> Result<ModelManifest, AppError> {
+    serde_json::from_str(MANIFEST_JSON).map_err(|e| AppError::Io(format!("Failed to parse model manifest: {}", e)))
 }
 
 /// Gets the directory where models are stored
-pub fn get_storage_directory(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn get_storage_directory(app: &AppHandle) -> Result<PathBuf, AppError> {
     // 1. If override env var is set (for tests / custom sandbox)
     if let Ok(dir_str) = std::env::var("SHARE2CAL_MODELS_DIR") {
         let dir = PathBuf::from(dir_str);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dir).map_err(|e| AppError::Io(e.to_string()))?;
         return Ok(dir);
     }
 
@@ -106,17 +107,14 @@ pub fn get_storage_directory(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_data_dir()
         .or_else(|_| app.path().app_local_data_dir())
-        .map_err(|e| format!("Could not resolve app data directory: {}", e))?;
+        .map_err(|e| AppError::Io(format!("Could not resolve app data directory: {}", e)))?;
 
     let models_dir = base_dir.join("models");
-    fs::create_dir_all(&models_dir).map_err(|e| format!("Failed to create models directory: {}", e))?;
+    fs::create_dir_all(&models_dir).map_err(|e| AppError::Io(format!("Failed to create models directory: {}", e)))?;
     Ok(models_dir)
 }
-
-/// Gets free disk space in bytes on Unix/macOS/iOS platforms
-
 /// Opens the models storage directory in the native file manager on desktop platforms
-pub fn open_models_directory(app: &AppHandle) -> Result<(), String> {
+pub fn open_models_directory(app: &AppHandle) -> Result<(), AppError> {
     let storage_dir = get_storage_directory(app)?;
 
     #[cfg(target_os = "macos")]
@@ -124,8 +122,8 @@ pub fn open_models_directory(app: &AppHandle) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&storage_dir)
             .spawn()
-            .map_err(|e| format!("Failed to open directory in Finder: {}", e))?;
-        return Ok(());
+            .map_err(|e| AppError::Io(format!("Failed to open directory in Finder: {}", e)))?;
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
@@ -133,8 +131,8 @@ pub fn open_models_directory(app: &AppHandle) -> Result<(), String> {
         std::process::Command::new("explorer")
             .arg(&storage_dir)
             .spawn()
-            .map_err(|e| format!("Failed to open directory in Explorer: {}", e))?;
-        return Ok(());
+            .map_err(|e| AppError::Io(format!("Failed to open directory in Explorer: {}", e)))?;
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -142,15 +140,17 @@ pub fn open_models_directory(app: &AppHandle) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(&storage_dir)
             .spawn()
-            .map_err(|e| format!("Failed to open directory: {}", e))?;
-        return Ok(());
+            .map_err(|e| AppError::Io(format!("Failed to open directory in Linux: {}", e)))?;
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        Err("Opening directory browser is not supported on mobile operating systems due to application sandboxing.".to_string())
+        Err(AppError::Io("Opening directory browser is not supported on mobile operating systems due to application sandboxing.".to_string()))
     }
 }
+
+/// Gets free disk space in bytes on Unix/macOS/iOS platforms
 pub fn get_free_disk_space(path: &Path) -> Option<u64> {
     #[cfg(unix)]
     {
@@ -168,7 +168,7 @@ pub fn get_free_disk_space(path: &Path) -> Option<u64> {
 }
 
 /// Returns the status of all available models in the manifest
-pub fn get_all_model_statuses(app: &AppHandle) -> Result<Vec<ModelStatus>, String> {
+pub fn get_all_model_statuses(app: &AppHandle) -> Result<Vec<ModelStatus>, AppError> {
     let manifest = get_manifest()?;
     let storage_dir = get_storage_directory(app)?;
     let storage_dir_str = storage_dir.to_string_lossy().to_string();
@@ -178,8 +178,7 @@ pub fn get_all_model_statuses(app: &AppHandle) -> Result<Vec<ModelStatus>, Strin
     let mut statuses = Vec::new();
     for entry in manifest.models {
         let target_file = storage_dir.join(&entry.filename);
-        let part_file = storage_dir.join(format!("{}.part", &entry.filename));
-
+        let part_file = storage_dir.join(format!("{}.part", entry.filename));
         let is_downloading = if let Some(st) = &state {
             if let Ok(guard) = st.cancel_flags.lock() {
                 guard.contains_key(&entry.id)
@@ -223,26 +222,24 @@ pub fn get_all_model_statuses(app: &AppHandle) -> Result<Vec<ModelStatus>, Strin
 
     Ok(statuses)
 }
-
 /// Returns the status of a specific model by ID
-pub fn get_single_model_status(app: &AppHandle, model_id: &str) -> Result<ModelStatus, String> {
+pub fn get_single_model_status(app: &AppHandle, model_id: &str) -> Result<ModelStatus, AppError> {
     let statuses = get_all_model_statuses(app)?;
     statuses
         .into_iter()
         .find(|m| m.id == model_id)
-        .ok_or_else(|| format!("Model with id '{}' not found in manifest", model_id))
+        .ok_or_else(|| AppError::ModelNotFound(model_id.to_string()))
 }
 
-/// Computes the SHA-256 checksum of a file
-pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|e| format!("Failed to open file for SHA-256: {}", e))?;
+pub fn compute_file_sha256(path: &Path) -> Result<String, AppError> {
+    let mut file = File::open(path).map_err(|e| AppError::Io(format!("Failed to open file for SHA-256: {}", e)))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024]; // 64KB buffer
 
     loop {
         let count = file
             .read(&mut buffer)
-            .map_err(|e| format!("Error reading file: {}", e))?;
+            .map_err(|e| AppError::Io(format!("Error reading file: {}", e)))?;
         if count == 0 {
             break;
         }
@@ -253,14 +250,13 @@ pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", result))
 }
 
-/// Verifies whether the downloaded model file matches the expected SHA-256 checksum
-pub fn verify_model(app: &AppHandle, model_id: &str) -> Result<bool, String> {
+pub fn verify_model(app: &AppHandle, model_id: &str) -> Result<bool, AppError> {
     let manifest = get_manifest()?;
     let entry = manifest
         .models
         .into_iter()
         .find(|m| m.id == model_id)
-        .ok_or_else(|| format!("Model '{}' not found in manifest", model_id))?;
+        .ok_or_else(|| AppError::ModelNotFound(model_id.to_string()))?;
 
     let storage_dir = get_storage_directory(app)?;
     let target_file = storage_dir.join(&entry.filename);
@@ -273,22 +269,18 @@ pub fn verify_model(app: &AppHandle, model_id: &str) -> Result<bool, String> {
     Ok(hash.eq_ignore_ascii_case(&entry.sha256))
 }
 
-/// Deletes a downloaded model and any partial temporary files
-pub fn delete_model_file(app: &AppHandle, model_id: &str) -> Result<(), String> {
+pub fn delete_model_file(app: &AppHandle, model_id: &str) -> Result<(), AppError> {
     let manifest = get_manifest()?;
     let entry = manifest
         .models
         .into_iter()
         .find(|m| m.id == model_id)
-        .ok_or_else(|| format!("Model '{}' not found in manifest", model_id))?;
+        .ok_or_else(|| AppError::ModelNotFound(model_id.to_string()))?;
 
     let storage_dir = get_storage_directory(app)?;
     let target_file = storage_dir.join(&entry.filename);
-    let part_file = storage_dir.join(format!("{}.part", &entry.filename));
-
-    if target_file.exists() {
-        fs::remove_file(&target_file).map_err(|e| format!("Failed to delete model file: {}", e))?;
-    }
+    let part_file = storage_dir.join(format!("{}.part", entry.filename));
+        fs::remove_file(&target_file).map_err(|e| AppError::Io(format!("Failed to delete model file: {}", e)))?;
     if part_file.exists() {
         let _ = fs::remove_file(&part_file);
     }
@@ -296,11 +288,10 @@ pub fn delete_model_file(app: &AppHandle, model_id: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Cancels an active download for a model
-pub fn cancel_download(app: &AppHandle, model_id: &str) -> Result<(), String> {
+pub fn cancel_download(app: &AppHandle, model_id: &str) -> Result<(), AppError> {
     let state = app
         .try_state::<DownloadState>()
-        .ok_or_else(|| "Download state not initialized".to_string())?;
+        .ok_or_else(|| AppError::Download("Download state not initialized".to_string()))?;
 
     if let Ok(mut guard) = state.cancel_flags.lock() {
         if let Some(flag) = guard.remove(model_id) {
@@ -324,29 +315,27 @@ pub fn cancel_download(app: &AppHandle, model_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Asynchronously downloads a model from Hugging Face with progress streaming and SHA-256 verification
-pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<(), String> {
+pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<(), AppError> {
     let manifest = get_manifest()?;
     let entry = manifest
         .models
         .into_iter()
         .find(|m| m.id == model_id)
-        .ok_or_else(|| format!("Model '{}' not found in manifest", model_id))?;
+        .ok_or_else(|| AppError::ModelNotFound(model_id.clone()))?;
 
     let storage_dir = get_storage_directory(&app)?;
     let target_file = storage_dir.join(&entry.filename);
-    let part_file = storage_dir.join(format!("{}.part", &entry.filename));
-
+    let part_file = storage_dir.join(format!("{}.part", entry.filename));
     // Pre-flight: Check free disk space (require at least 1.5x model size)
     if let Some(free_space) = get_free_disk_space(&storage_dir) {
         let required_space = (entry.size_bytes as f64 * 1.5) as u64;
         if free_space < required_space {
             let free_mb = free_space / (1024 * 1024);
             let req_mb = required_space / (1024 * 1024);
-            let err_msg = format!(
-                "Insufficient disk space: {} MB free, but {} MB required.",
-                free_mb, req_mb
-            );
+            let err = AppError::InsufficientDiskSpace {
+                required_mb: req_mb,
+                available_mb: free_mb,
+            };
             let _ = app.emit(
                 "model_download_progress",
                 DownloadProgressPayload {
@@ -356,10 +345,10 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                     percentage: 0.0,
                     speed_bytes_per_sec: 0.0,
                     status: "error".to_string(),
-                    error: Some(err_msg.clone()),
+                    error: Some(err.to_string()),
                 },
             );
-            return Err(err_msg);
+            return Err(err);
         }
     }
 
@@ -381,7 +370,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3600))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| AppError::Download(format!("Failed to create HTTP client: {}", e)))?;
 
     let mut request = client.get(&entry.url);
     if existing_bytes > 0 && existing_bytes < entry.size_bytes {
@@ -392,7 +381,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
         Ok(res) => res,
         Err(e) => {
             cleanup_cancel_flag(&app, &entry.id);
-            let err_msg = format!("Download request failed: {}", e);
+            let err = AppError::Download(format!("Download request failed: {}", e));
             let _ = app.emit(
                 "model_download_progress",
                 DownloadProgressPayload {
@@ -402,10 +391,10 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                     percentage: (existing_bytes as f64 / entry.size_bytes as f64) * 100.0,
                     speed_bytes_per_sec: 0.0,
                     status: "error".to_string(),
-                    error: Some(err_msg.clone()),
+                    error: Some(err.to_string()),
                 },
             );
-            return Err(err_msg);
+            return Err(err);
         }
     };
 
@@ -413,7 +402,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
     let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
     if !status.is_success() {
         cleanup_cancel_flag(&app, &entry.id);
-        let err_msg = format!("Server returned HTTP status {}", status);
+        let err = AppError::Download(format!("Server returned HTTP status {}", status));
         let _ = app.emit(
             "model_download_progress",
             DownloadProgressPayload {
@@ -423,10 +412,10 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                 percentage: 0.0,
                 speed_bytes_per_sec: 0.0,
                 status: "error".to_string(),
-                error: Some(err_msg.clone()),
+                error: Some(err.to_string()),
             },
         );
-        return Err(err_msg);
+        return Err(err);
     }
 
     // Open file for appending if partial, or create new
@@ -438,8 +427,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
         Ok(f) => f,
         Err(e) => {
             cleanup_cancel_flag(&app, &entry.id);
-            let err_msg = format!("Failed to open part file: {}", e);
-            return Err(err_msg);
+            return Err(AppError::Io(format!("Failed to open part file: {}", e)));
         }
     };
 
@@ -488,7 +476,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
             Ok(c) => c,
             Err(e) => {
                 cleanup_cancel_flag(&app, &entry.id);
-                let err_msg = format!("Stream error during download: {}", e);
+                let err = AppError::Download(format!("Stream error during download: {}", e));
                 let _ = app.emit(
                     "model_download_progress",
                     DownloadProgressPayload {
@@ -498,17 +486,17 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                         percentage: (downloaded as f64 / total_bytes as f64) * 100.0,
                         speed_bytes_per_sec: 0.0,
                         status: "error".to_string(),
-                        error: Some(err_msg.clone()),
+                        error: Some(err.to_string()),
                     },
                 );
-                return Err(err_msg);
+                return Err(err);
             }
         };
 
         if let Err(e) = file.write_all(&chunk) {
             cleanup_cancel_flag(&app, &entry.id);
-            let err_msg = format!("Failed to write chunk to disk: {}", e);
-            return Err(err_msg);
+            let err = AppError::Io(format!("Failed to write chunk to disk: {}", e));
+            return Err(err);
         }
 
         downloaded += chunk.len() as u64;
@@ -542,7 +530,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
 
     if let Err(e) = file.flush() {
         cleanup_cancel_flag(&app, &entry.id);
-        return Err(format!("Failed to flush file to disk: {}", e));
+        return Err(AppError::Io(format!("Failed to flush file to disk: {}", e)));
     }
     drop(file);
 
@@ -564,7 +552,7 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
         Ok(h) => h,
         Err(e) => {
             cleanup_cancel_flag(&app, &entry.id);
-            let err_msg = format!("Failed to compute SHA-256 of downloaded file: {}", e);
+            let err = AppError::Io(format!("Failed to compute SHA-256 of downloaded file: {}", e));
             let _ = app.emit(
                 "model_download_progress",
                 DownloadProgressPayload {
@@ -574,20 +562,20 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                     percentage: 100.0,
                     speed_bytes_per_sec: 0.0,
                     status: "error".to_string(),
-                    error: Some(err_msg.clone()),
+                    error: Some(err.to_string()),
                 },
             );
-            return Err(err_msg);
+            return Err(err);
         }
     };
 
     if !actual_hash.eq_ignore_ascii_case(&entry.sha256) {
         cleanup_cancel_flag(&app, &entry.id);
         let _ = fs::remove_file(&part_file);
-        let err_msg = format!(
-            "SHA-256 checksum mismatch! Expected: {}, Computed: {}",
+        let err = AppError::ChecksumMismatch(format!(
+            "{}, Computed: {}",
             entry.sha256, actual_hash
-        );
+        ));
         let _ = app.emit(
             "model_download_progress",
             DownloadProgressPayload {
@@ -597,10 +585,10 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
                 percentage: 100.0,
                 speed_bytes_per_sec: 0.0,
                 status: "error".to_string(),
-                error: Some(err_msg.clone()),
+                error: Some(err.to_string()),
             },
         );
-        return Err(err_msg);
+        return Err(err);
     }
 
     // Rename part file to final model destination
@@ -609,8 +597,8 @@ pub async fn start_model_download(app: AppHandle, model_id: String) -> Result<()
     }
     if let Err(e) = fs::rename(&part_file, &target_file) {
         cleanup_cancel_flag(&app, &entry.id);
-        let err_msg = format!("Failed to move verified model into place: {}", e);
-        return Err(err_msg);
+        let err = AppError::Io(format!("Failed to move verified model into place: {}", e));
+        return Err(err);
     }
 
     cleanup_cancel_flag(&app, &entry.id);
@@ -640,7 +628,7 @@ fn cleanup_cancel_flag(app: &AppHandle, model_id: &str) {
     }
 }
 
-pub fn get_models_storage_info(app: &AppHandle) -> Result<ModelsStorageInfo, String> {
+pub fn get_models_storage_info(app: &AppHandle) -> Result<ModelsStorageInfo, AppError> {
     let storage_dir = get_storage_directory(app)?;
     let statuses = get_all_model_statuses(app)?;
 

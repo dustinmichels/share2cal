@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,11 +104,11 @@ pub fn reconstruct_spatial_lines(lines: &[OcrLine]) -> String {
             let c_max_y = cluster.avg_center_y + (cluster.avg_height / 2.0);
             let overlap_y = item.max_y.min(c_max_y) - item.min_y.max(c_min_y);
 
-            if overlap_y > (0.35 * ref_h) || vert_dist < (0.35 * ref_h) {
-                if overlap_y > best_overlap || matched_idx.is_none() {
-                    best_overlap = overlap_y;
-                    matched_idx = Some(c_idx);
-                }
+            if (overlap_y > (0.35 * ref_h) || vert_dist < (0.35 * ref_h))
+                && (overlap_y > best_overlap || matched_idx.is_none())
+            {
+                best_overlap = overlap_y;
+                matched_idx = Some(c_idx);
             }
         }
 
@@ -156,8 +157,9 @@ pub fn reconstruct_spatial_lines(lines: &[OcrLine]) -> String {
 }
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
-    use super::OcrResult;
-    use std::ffi::{CStr, CString};
+    use super::{AppError, OcrResult};
+    use crate::ffi::NativeStringGuard;
+    use std::ffi::CString;
     use std::os::raw::{c_char, c_int};
 
     extern "C" {
@@ -177,40 +179,31 @@ mod apple {
         fn ocr_apple_free_string(ptr: *mut c_char);
     }
 
-    struct AutoCString(*mut c_char);
-
-    impl Drop for AutoCString {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe { ocr_apple_free_string(self.0) };
-            }
-        }
-    }
-
-    pub fn extract_from_path(path: &str) -> Result<OcrResult, String> {
-        let c_path = CString::new(path).map_err(|e| format!("Invalid path string: {}", e))?;
+    pub fn extract_text_from_path(path: &str) -> Result<OcrResult, AppError> {
+        let c_path = CString::new(path).map_err(|e| AppError::Ocr(format!("Invalid path string: {}", e)))?;
         let mut out_json: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
 
         let ret = unsafe { ocr_apple_from_file(c_path.as_ptr(), &mut out_json, &mut out_error) };
 
-        let _guard_json = AutoCString(out_json);
-        let _guard_err = AutoCString(out_error);
+        let guard_json = NativeStringGuard::new(out_json, ocr_apple_free_string);
+        let guard_err = NativeStringGuard::new(out_error, ocr_apple_free_string);
 
-        if ret != 0 || out_json.is_null() {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Unknown OCR error".to_string()
-            };
-            return Err(err_msg);
+        if ret != 0 || guard_json.is_null() {
+            let err_msg = guard_err
+                .to_string_lossy()
+                .unwrap_or_else(|| "Unknown OCR error".to_string());
+            return Err(AppError::Ocr(err_msg));
         }
 
-        let json_str = unsafe { CStr::from_ptr(out_json).to_string_lossy() };
-        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse OCR JSON response: {}", e))
+        let json_str = guard_json
+            .to_string_lossy()
+            .ok_or_else(|| AppError::Ocr("OCR JSON output is null".to_string()))?;
+        serde_json::from_str(&json_str)
+            .map_err(|e| AppError::Ocr(format!("Failed to parse OCR JSON response: {}", e)))
     }
 
-    pub fn extract_from_bytes(bytes: &[u8]) -> Result<OcrResult, String> {
+    pub fn extract_text_from_bytes(bytes: &[u8]) -> Result<OcrResult, AppError> {
         let mut out_json: *mut c_char = std::ptr::null_mut();
         let mut out_error: *mut c_char = std::ptr::null_mut();
 
@@ -223,48 +216,42 @@ mod apple {
             )
         };
 
-        let _guard_json = AutoCString(out_json);
-        let _guard_err = AutoCString(out_error);
+        let guard_json = NativeStringGuard::new(out_json, ocr_apple_free_string);
+        let guard_err = NativeStringGuard::new(out_error, ocr_apple_free_string);
 
-        if ret != 0 || out_json.is_null() {
-            let err_msg = if !out_error.is_null() {
-                unsafe { CStr::from_ptr(out_error).to_string_lossy().into_owned() }
-            } else {
-                "Unknown OCR error".to_string()
-            };
-            return Err(err_msg);
+        if ret != 0 || guard_json.is_null() {
+            let err_msg = guard_err
+                .to_string_lossy()
+                .unwrap_or_else(|| "Unknown OCR error".to_string());
+            return Err(AppError::Ocr(err_msg));
         }
 
-        let json_str = unsafe { CStr::from_ptr(out_json).to_string_lossy() };
-        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse OCR JSON response: {}", e))
+        let json_str = guard_json
+            .to_string_lossy()
+            .ok_or_else(|| AppError::Ocr("OCR JSON output is null".to_string()))?;
+        serde_json::from_str(&json_str)
+            .map_err(|e| AppError::Ocr(format!("Failed to parse OCR JSON response: {}", e)))
     }
 }
 
-pub fn extract_text_from_path(path: &str) -> Result<OcrResult, String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        apple::extract_from_path(path)
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+mod fallback {
+    use super::{AppError, OcrResult};
+
+    pub fn extract_text_from_path(_path: &str) -> Result<OcrResult, AppError> {
+        Err(AppError::Ocr("OCR is only supported on Apple platforms (macOS/iOS) or Android ML Kit.".to_string()))
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    {
-        let _ = path;
-        Err("OCR is only supported on Apple platforms (macOS/iOS) or Android ML Kit.".to_string())
+    pub fn extract_text_from_bytes(_bytes: &[u8]) -> Result<OcrResult, AppError> {
+        Err(AppError::Ocr("OCR is only supported on Apple platforms (macOS/iOS) or Android ML Kit.".to_string()))
     }
 }
 
-pub fn extract_text_from_bytes(bytes: &[u8]) -> Result<OcrResult, String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        apple::extract_from_bytes(bytes)
-    }
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use apple::*;
 
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    {
-        let _ = bytes;
-        Err("OCR is only supported on Apple platforms (macOS/iOS) or Android ML Kit.".to_string())
-    }
-}
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub use fallback::*;
 
 #[cfg(test)]
 mod tests {

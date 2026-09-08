@@ -1,7 +1,7 @@
+use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-
 pub const DEFAULT_APP_GROUP_ID: &str = "group.com.dustinmichels.share2cal";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -16,25 +16,6 @@ pub struct SharedImagePayload {
     pub bytes: Option<Vec<u8>>,
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod ffi {
-    use std::os::raw::{c_char, c_uchar};
-
-    extern "C" {
-        pub fn get_app_group_pending_share_json(group_id: *const c_char) -> *mut c_char;
-        pub fn get_app_group_shared_image_path(group_id: *const c_char) -> *mut c_char;
-        pub fn clear_app_group_shared_data(group_id: *const c_char) -> bool;
-        pub fn save_app_group_shared_image(
-            group_id: *const c_char,
-            bytes: *const c_uchar,
-            len: usize,
-            filename: *const c_char,
-            mime_type: *const c_char,
-        ) -> bool;
-        pub fn free_share_string(str: *mut c_char);
-    }
-}
-
 /// Fallback staging directory for cross-platform support and test isolation
 fn get_fallback_shared_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("SHARE2CAL_SHARED_DIR") {
@@ -43,99 +24,12 @@ fn get_fallback_shared_dir() -> PathBuf {
     std::env::temp_dir().join("share2cal_shared_images")
 }
 
-/// Retrieves any pending shared image waiting in the App Group container (or fallback staging dir).
-pub fn get_pending_shared_image(include_bytes: bool) -> Result<Option<SharedImagePayload>, String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        use std::ffi::{CStr, CString};
-
-        let group_c_str = CString::new(DEFAULT_APP_GROUP_ID).map_err(|e| e.to_string())?;
-
-        // 1. Try reading the manifest JSON via native App Group FFI
-        let json_ptr = unsafe { ffi::get_app_group_pending_share_json(group_c_str.as_ptr()) };
-        if !json_ptr.is_null() {
-            let json_str = unsafe {
-                let s = CStr::from_ptr(json_ptr).to_string_lossy().into_owned();
-                ffi::free_share_string(json_ptr);
-                s
-            };
-
-            if let Ok(mut payload) = serde_json::from_str::<SharedImagePayload>(&json_str) {
-                if include_bytes && payload.bytes.is_none() && Path::new(&payload.file_path).exists() {
-                    if let Ok(data) = fs::read(&payload.file_path) {
-                        payload.bytes = Some(data);
-                    }
-                }
-                return Ok(Some(payload));
-            }
-        }
-
-        // 2. Try reading shared image path directly
-        let path_ptr = unsafe { ffi::get_app_group_shared_image_path(group_c_str.as_ptr()) };
-        if !path_ptr.is_null() {
-            let path_str = unsafe {
-                let s = CStr::from_ptr(path_ptr).to_string_lossy().into_owned();
-                ffi::free_share_string(path_ptr);
-                s
-            };
-
-            let path = Path::new(&path_str);
-            if path.exists() {
-                let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
-                let file_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "shared_flyer.png".to_string());
-
-                let ext = path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-
-                let mime_type = match ext.as_str() {
-                    "jpg" | "jpeg" => "image/jpeg",
-                    "heic" | "heif" => "image/heic",
-                    "webp" => "image/webp",
-                    _ => "image/png",
-                }
-                .to_string();
-
-                let bytes = if include_bytes {
-                    Some(fs::read(path).map_err(|e| e.to_string())?)
-                } else {
-                    None
-                };
-
-                let timestamp = metadata
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-
-                return Ok(Some(SharedImagePayload {
-                    file_name,
-                    file_path: path_str,
-                    mime_type,
-                    size_bytes: metadata.len() as usize,
-                    timestamp,
-                    source: "native_apple_share".to_string(),
-                    bytes,
-                }));
-            }
-        }
-    }
-
-    // Fallback: check staging directory
-    get_fallback_pending_shared_image(include_bytes)
-}
-
-fn get_fallback_pending_shared_image(include_bytes: bool) -> Result<Option<SharedImagePayload>, String> {
+fn get_fallback_pending_shared_image(include_bytes: bool) -> Result<Option<SharedImagePayload>, AppError> {
     let shared_dir = get_fallback_shared_dir();
     let manifest_path = shared_dir.join("pending_share.json");
 
     if manifest_path.exists() {
-        let content = fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+        let content = fs::read_to_string(&manifest_path).map_err(|e| AppError::Io(e.to_string()))?;
         if let Ok(mut payload) = serde_json::from_str::<SharedImagePayload>(&content) {
             if Path::new(&payload.file_path).exists() {
                 if include_bytes && payload.bytes.is_none() {
@@ -190,11 +84,10 @@ fn get_fallback_pending_shared_image(include_bytes: bool) -> Result<Option<Share
                 .to_string();
 
                 let bytes = if include_bytes {
-                    Some(fs::read(&path).map_err(|e| e.to_string())?)
+                    Some(fs::read(&path).map_err(|e| AppError::Io(e.to_string()))?)
                 } else {
                     None
                 };
-
                 let timestamp = meta
                     .modified()
                     .ok()
@@ -218,18 +111,7 @@ fn get_fallback_pending_shared_image(include_bytes: bool) -> Result<Option<Share
     Ok(None)
 }
 
-/// Clears pending shared images in both native App Group storage and fallback staging directory.
-pub fn clear_pending_shared_image() -> Result<(), String> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        use std::ffi::CString;
-        if let Ok(group_c_str) = CString::new(DEFAULT_APP_GROUP_ID) {
-            unsafe {
-                ffi::clear_app_group_shared_data(group_c_str.as_ptr());
-            }
-        }
-    }
-
+fn clear_fallback_shared_dir() -> Result<(), AppError> {
     let shared_dir = get_fallback_shared_dir();
     if shared_dir.exists() {
         if let Ok(entries) = fs::read_dir(&shared_dir) {
@@ -238,54 +120,19 @@ pub fn clear_pending_shared_image() -> Result<(), String> {
             }
         }
     }
-
     Ok(())
 }
 
-/// Stages an image into the shared container (using Apple FFI if available, or fallback directory).
-pub fn stage_shared_image(
+fn stage_fallback_shared_image(
     bytes: &[u8],
     file_name: &str,
-    mime_type: Option<&str>,
-) -> Result<SharedImagePayload, String> {
-    if bytes.is_empty() {
-        return Err("Cannot stage empty image bytes".to_string());
-    }
-
-    let mime = mime_type.unwrap_or("image/png");
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        use std::ffi::CString;
-
-        let group_c_str = CString::new(DEFAULT_APP_GROUP_ID).map_err(|e| e.to_string())?;
-        let name_c_str = CString::new(file_name).map_err(|e| e.to_string())?;
-        let mime_c_str = CString::new(mime).map_err(|e| e.to_string())?;
-
-        let saved = unsafe {
-            ffi::save_app_group_shared_image(
-                group_c_str.as_ptr(),
-                bytes.as_ptr(),
-                bytes.len(),
-                name_c_str.as_ptr(),
-                mime_c_str.as_ptr(),
-            )
-        };
-
-        if saved {
-            if let Ok(Some(payload)) = get_pending_shared_image(true) {
-                return Ok(payload);
-            }
-        }
-    }
-
-    // Fallback staging
+    mime_type: &str,
+) -> Result<SharedImagePayload, AppError> {
     let shared_dir = get_fallback_shared_dir();
-    fs::create_dir_all(&shared_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&shared_dir).map_err(|e| AppError::Io(e.to_string()))?;
 
     let file_path = shared_dir.join(file_name);
-    fs::write(&file_path, bytes).map_err(|e| e.to_string())?;
-
+    fs::write(&file_path, bytes).map_err(|e| AppError::Io(e.to_string()))?;
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -294,7 +141,7 @@ pub fn stage_shared_image(
     let payload = SharedImagePayload {
         file_name: file_name.to_string(),
         file_path: file_path.to_string_lossy().into_owned(),
-        mime_type: mime.to_string(),
+        mime_type: mime_type.to_string(),
         size_bytes: bytes.len(),
         timestamp,
         source: "fallback_staging".to_string(),
@@ -308,17 +155,190 @@ pub fn stage_shared_image(
 
     Ok(payload)
 }
-/// Reads an image from the filesystem given its path (e.g. from a drag-and-drop event).
-pub fn load_image_from_path(path: &str) -> Result<SharedImagePayload, String> {
-    let p = Path::new(path);
-    if !p.exists() {
-        return Err(format!("File does not exist at path: {}", path));
-    }
-    let metadata = fs::metadata(p).map_err(|e| format!("Failed to read metadata: {}", e))?;
-    if metadata.is_dir() {
-        return Err("Dropped item is a directory, not an image file".to_string());
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod apple {
+    use super::{
+        clear_fallback_shared_dir, get_fallback_pending_shared_image, stage_fallback_shared_image,
+        AppError, SharedImagePayload, DEFAULT_APP_GROUP_ID,
+    };
+    use crate::ffi::NativeStringGuard;
+    use std::ffi::CString;
+    use std::fs;
+    use std::os::raw::{c_char, c_uchar};
+    use std::path::Path;
+
+    extern "C" {
+        fn get_app_group_pending_share_json(group_id: *const c_char) -> *mut c_char;
+        fn get_app_group_shared_image_path(group_id: *const c_char) -> *mut c_char;
+        fn clear_app_group_shared_data(group_id: *const c_char) -> bool;
+        fn save_app_group_shared_image(
+            group_id: *const c_char,
+            bytes: *const c_uchar,
+            len: usize,
+            filename: *const c_char,
+            mime_type: *const c_char,
+        ) -> bool;
+        fn free_share_string(str: *mut c_char);
     }
 
+    pub fn get_pending_shared_image(include_bytes: bool) -> Result<Option<SharedImagePayload>, AppError> {
+        let group_c_str = CString::new(DEFAULT_APP_GROUP_ID).map_err(|e| AppError::Io(e.to_string()))?;
+        // 1. Try reading the manifest JSON via native App Group FFI
+        let json_ptr = unsafe { get_app_group_pending_share_json(group_c_str.as_ptr()) };
+        let json_guard = NativeStringGuard::new(json_ptr, free_share_string);
+        if let Some(json_str) = json_guard.to_string_lossy() {
+            if let Ok(mut payload) = serde_json::from_str::<SharedImagePayload>(&json_str) {
+                if include_bytes && payload.bytes.is_none() && Path::new(&payload.file_path).exists() {
+                    if let Ok(data) = fs::read(&payload.file_path) {
+                        payload.bytes = Some(data);
+                    }
+                }
+                return Ok(Some(payload));
+            }
+        }
+
+        // 2. Try reading shared image path directly
+        let path_ptr = unsafe { get_app_group_shared_image_path(group_c_str.as_ptr()) };
+        let path_guard = NativeStringGuard::new(path_ptr, free_share_string);
+        if let Some(path_str) = path_guard.to_string_lossy() {
+            let path = Path::new(&path_str);
+            if path.exists() {
+                let metadata = fs::metadata(path).map_err(|e| AppError::Io(e.to_string()))?;
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "shared_flyer.png".to_string());
+
+                let ext = path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+
+                let mime_type = match ext.as_str() {
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "heic" | "heif" => "image/heic",
+                    "webp" => "image/webp",
+                    _ => "image/png",
+                }
+                .to_string();
+
+                let bytes = if include_bytes {
+                    Some(fs::read(path).map_err(|e| AppError::Io(e.to_string()))?)
+                } else {
+                    None
+                };
+                let timestamp = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                return Ok(Some(SharedImagePayload {
+                    file_name,
+                    file_path: path_str,
+                    mime_type,
+                    size_bytes: metadata.len() as usize,
+                    timestamp,
+                    source: "native_apple_share".to_string(),
+                    bytes,
+                }));
+            }
+        }
+
+        // Fallback: check staging directory
+        get_fallback_pending_shared_image(include_bytes)
+    }
+
+    pub fn clear_pending_shared_image() -> Result<(), AppError> {
+        if let Ok(group_c_str) = CString::new(DEFAULT_APP_GROUP_ID) {
+            unsafe {
+                clear_app_group_shared_data(group_c_str.as_ptr());
+            }
+        }
+        clear_fallback_shared_dir()
+    }
+
+    pub fn stage_shared_image(
+        bytes: &[u8],
+        file_name: &str,
+        mime_type: Option<&str>,
+    ) -> Result<SharedImagePayload, AppError> {
+        if bytes.is_empty() {
+            return Err(AppError::Io("Cannot stage empty image bytes".to_string()));
+        }
+
+        let mime = mime_type.unwrap_or("image/png");
+
+        let group_c_str = CString::new(DEFAULT_APP_GROUP_ID).map_err(|e| AppError::Io(e.to_string()))?;
+        let name_c_str = CString::new(file_name).map_err(|e| AppError::Io(e.to_string()))?;
+        let mime_c_str = CString::new(mime).map_err(|e| AppError::Io(e.to_string()))?;
+
+        let saved = unsafe {
+            save_app_group_shared_image(
+                group_c_str.as_ptr(),
+                bytes.as_ptr(),
+                bytes.len(),
+                name_c_str.as_ptr(),
+                mime_c_str.as_ptr(),
+            )
+        };
+
+        if saved {
+            if let Ok(Some(payload)) = get_pending_shared_image(true) {
+                return Ok(payload);
+            }
+        }
+
+        // Fallback staging
+        stage_fallback_shared_image(bytes, file_name, mime)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+mod fallback {
+    use super::{
+        clear_fallback_shared_dir, get_fallback_pending_shared_image, stage_fallback_shared_image,
+        AppError, SharedImagePayload,
+    };
+
+    pub fn get_pending_shared_image(include_bytes: bool) -> Result<Option<SharedImagePayload>, AppError> {
+        get_fallback_pending_shared_image(include_bytes)
+    }
+
+    pub fn clear_pending_shared_image() -> Result<(), AppError> {
+        clear_fallback_shared_dir()
+    }
+
+    pub fn stage_shared_image(
+        bytes: &[u8],
+        file_name: &str,
+        mime_type: Option<&str>,
+    ) -> Result<SharedImagePayload, AppError> {
+        if bytes.is_empty() {
+            return Err(AppError::Io("Cannot stage empty image bytes".to_string()));
+        }
+        let mime = mime_type.unwrap_or("image/png");
+        stage_fallback_shared_image(bytes, file_name, mime)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use apple::*;
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub use fallback::*;
+/// Reads an image from the filesystem given its path (e.g. from a drag-and-drop event).
+pub fn load_image_from_path(path: &str) -> Result<SharedImagePayload, AppError> {
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(AppError::Io(format!("File does not exist at path: {}", path)));
+    }
+    let metadata = fs::metadata(p).map_err(|e| AppError::Io(format!("Failed to read metadata: {}", e)))?;
+    if metadata.is_dir() {
+        return Err(AppError::Io("Dropped item is a directory, not an image file".to_string()));
+    }
     let file_name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -343,7 +363,7 @@ pub fn load_image_from_path(path: &str) -> Result<SharedImagePayload, String> {
     }
     .to_string();
 
-    let bytes = fs::read(p).map_err(|e| format!("Failed to read file bytes: {}", e))?;
+    let bytes = fs::read(p).map_err(|e| AppError::Io(format!("Failed to read file bytes: {}", e)))?;
     let timestamp = metadata
         .modified()
         .ok()
@@ -363,8 +383,8 @@ pub fn load_image_from_path(path: &str) -> Result<SharedImagePayload, String> {
 }
 
 
-#[cfg(test)]
-pub(crate) static TEST_SHARE_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[doc(hidden)]
+pub static TEST_SHARE_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {

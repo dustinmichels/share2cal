@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use crate::model;
 use crate::parser::{self, EventDetails, ReferenceContext};
 use encoding_rs::UTF_8;
@@ -11,7 +12,7 @@ use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio::sync::Mutex as TokioMutex;
@@ -63,13 +64,11 @@ pub const DEFAULT_MAX_GENERATION_TOKENS: usize = 1536;
 pub const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 5;
 
 static BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
-pub static ENGINE_MANAGER: LazyLock<InferenceEngineManager> = LazyLock::new(InferenceEngineManager::new);
-
-pub fn get_global_backend() -> Result<Arc<LlamaBackend>, String> {
+pub fn get_global_backend() -> Result<Arc<LlamaBackend>, AppError> {
     if let Some(backend) = BACKEND.get() {
         return Ok(Arc::clone(backend));
     }
-    let backend = LlamaBackend::init().map_err(|e| format!("Failed to init llama backend: {}", e))?;
+    let backend = LlamaBackend::init().map_err(|e| AppError::Inference(format!("Failed to init llama backend: {}", e)))?;
     let backend_arc = Arc::new(backend);
     let _ = BACKEND.set(Arc::clone(&backend_arc));
     Ok(backend_arc)
@@ -81,7 +80,7 @@ pub fn get_optimal_thread_count() -> i32 {
     let count = std::thread::available_parallelism()
         .map(|n| n.get() as i32)
         .unwrap_or(4);
-    std::cmp::min(4, std::cmp::max(1, count))
+    count.clamp(1, 4)
 }
 
 pub struct LoadedModel {
@@ -94,22 +93,23 @@ pub struct InferenceEngineManager {
     loaded_model: TokioMutex<Option<LoadedModel>>,
 }
 
+impl Default for InferenceEngineManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InferenceEngineManager {
     pub fn new() -> Self {
         Self {
             loaded_model: TokioMutex::new(None),
         }
     }
-
-    pub fn global() -> &'static InferenceEngineManager {
-        &ENGINE_MANAGER
-    }
-
     pub async fn get_or_load_model(
         &self,
         model_id: &str,
         model_path: &Path,
-    ) -> Result<Arc<LlamaModel>, String> {
+    ) -> Result<Arc<LlamaModel>, AppError> {
         let mut guard = self.loaded_model.lock().await;
         if let Some(loaded) = &*guard {
             if loaded.model_id == model_id && loaded.model_path == model_path {
@@ -129,10 +129,10 @@ impl InferenceEngineManager {
             }
 
             LlamaModel::load_from_file(&backend, &path_clone, &model_params)
-                .map_err(|e| format!("Failed to load GGUF model from {:?}: {}", path_clone, e))
+                .map_err(|e| AppError::Inference(format!("Failed to load GGUF model from {:?}: {}", path_clone, e)))
         })
         .await
-        .map_err(|e| format!("Model loading task panicked: {}", e))??;
+        .map_err(|e| AppError::Inference(format!("Model loading task panicked: {}", e)))??;
 
         let model_arc = Arc::new(loaded_model);
         *guard = Some(LoadedModel {
@@ -165,7 +165,7 @@ pub fn run_inference_sync(
     prompt: &str,
     max_tokens: usize,
     deadline: Option<Instant>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let backend = get_global_backend()?;
     let thread_count = get_optimal_thread_count();
 
@@ -177,29 +177,29 @@ pub fn run_inference_sync(
 
     let mut ctx = model
         .new_context(&backend, ctx_params)
-        .map_err(|e| format!("Failed to create llama context: {}", e))?;
+        .map_err(|e| AppError::Inference(format!("Failed to create llama context: {}", e)))?;
 
     let mut sampler = LlamaSampler::greedy();
-    eprintln!("[Debug] Sampler initialized before prompt decoding");
+    tracing::debug!("Sampler initialized before prompt decoding");
 
     // Tokenize prompt
     let tokens = model
         .str_to_token(prompt, AddBos::Always)
-        .map_err(|e| format!("Failed to tokenize prompt: {}", e))?;
+        .map_err(|e| AppError::Inference(format!("Failed to tokenize prompt: {}", e)))?;
 
     if tokens.is_empty() {
-        return Err("Prompt resulted in zero tokens".to_string());
+        return Err(AppError::Inference("Prompt resulted in zero tokens".to_string()));
     }
 
     let n_ctx = DEFAULT_CONTEXT_WINDOW as usize;
     let reserve = max_tokens.min(MAX_OUTPUT_TOKENS);
     if tokens.len() + reserve > n_ctx {
-        return Err(format!(
+        return Err(AppError::Inference(format!(
             "Prompt exceeds context window limit with reserved output headroom (tokens: {}, reserve: {}, n_ctx: {})",
             tokens.len(),
             reserve,
             n_ctx
-        ));
+        )));
     }
 
     // Process prompt tokens in batch
@@ -211,11 +211,11 @@ pub fn run_inference_sync(
         let is_last = i == total_prompt_tokens - 1;
         batch
             .add(token, i as i32, &[0], is_last)
-            .map_err(|e| format!("Failed to add token to batch: {}", e))?;
+            .map_err(|e| AppError::Inference(format!("Failed to add token to batch: {}", e)))?;
 
         if batch.n_tokens() >= batch_size as i32 || is_last {
             ctx.decode(&mut batch)
-                .map_err(|e| format!("Failed to decode batch: {}", e))?;
+                .map_err(|e| AppError::Inference(format!("Failed to decode batch: {}", e)))?;
             if !is_last {
                 batch.clear();
             }
@@ -235,7 +235,7 @@ pub fn run_inference_sync(
     for _step in 0..max_generation_steps {
         if let Some(dl) = deadline {
             if Instant::now() >= dl {
-                return Err("Inference deadline exceeded".to_string());
+                return Err(AppError::InferenceTimeout(DEFAULT_INFERENCE_TIMEOUT_SECS));
             }
         }
 
@@ -247,7 +247,7 @@ pub fn run_inference_sync(
         // Decode token to string piece
         let piece = model
             .token_to_piece(token, &mut decoder, false, None)
-            .map_err(|e| format!("Failed to decode token to string piece: {}", e))?;
+            .map_err(|e| AppError::Inference(format!("Failed to decode token to string piece: {}", e)))?;
         generated_text.push_str(&piece);
 
         // If closing JSON brace is reached and JSON parses, stop early
@@ -256,19 +256,19 @@ pub fn run_inference_sync(
         } else {
             generated_text.trim().to_string()
         };
-        if candidate_json.trim_end().ends_with('}') {
-            if serde_json::from_str::<serde_json::Value>(candidate_json.trim()).is_ok() {
-                break;
-            }
+        if candidate_json.trim_end().ends_with('}')
+            && serde_json::from_str::<serde_json::Value>(candidate_json.trim()).is_ok()
+        {
+            break;
         }
         // Add generated token for next step decode
         batch.clear();
         batch
             .add(token, current_pos, &[0], true)
-            .map_err(|e| format!("Failed to add generated token to batch: {}", e))?;
+            .map_err(|e| AppError::Inference(format!("Failed to add generated token to batch: {}", e)))?;
 
         ctx.decode(&mut batch)
-            .map_err(|e| format!("Failed to decode generated token: {}", e))?;
+            .map_err(|e| AppError::Inference(format!("Failed to decode generated token: {}", e)))?;
 
         token = sampler.sample(&ctx, -1);
         sampler.accept(token);
@@ -292,7 +292,7 @@ pub async fn run_inference_async(
     prompt: String,
     max_tokens: usize,
     timeout_duration: Duration,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let deadline = Instant::now() + timeout_duration;
     let infer_future = tokio::task::spawn_blocking(move || {
         run_inference_sync(&model, &prompt, max_tokens, Some(deadline))
@@ -300,12 +300,9 @@ pub async fn run_inference_async(
 
     match tokio::time::timeout(timeout_duration, infer_future).await {
         Ok(join_res) => {
-            join_res.map_err(|e| format!("Inference worker panicked: {}", e))?
+            join_res.map_err(|e| AppError::Inference(format!("Inference worker panicked: {}", e)))?
         }
-        Err(_) => Err(format!(
-            "Inference timed out after {:.1} seconds",
-            timeout_duration.as_secs_f32()
-        )),
+        Err(_) => Err(AppError::InferenceTimeout(timeout_duration.as_secs())),
     }
 }
 pub fn parse_llm_json_payload(raw_json: &str) -> Option<Vec<EventDetails>> {
@@ -425,9 +422,9 @@ fn extract_events_from_loose_llm_json(raw: &str) -> Vec<EventDetails> {
 }
 
 /// Orchestrates multi-event extraction using local LLM inference with dynamic context injection,
-/// constrained GBNF sampling, 5-second timeout guard, and seamless deterministic fallback.
 pub async fn extract_events_orchestrated(
     app: &AppHandle,
+    engine: &InferenceEngineManager,
     ocr_text: &str,
     context: &ReferenceContext,
     model_id_override: Option<&str>,
@@ -444,7 +441,7 @@ pub async fn extract_events_orchestrated(
     let manifest = match model::get_manifest() {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[Inference] Failed to load manifest: {}. Using deterministic fallback.", e);
+            tracing::warn!("Failed to load manifest: {}. Using deterministic fallback.", e);
             let mut events = parser::parse_events_deterministic(ocr_text, context);
             for event in &mut events {
                 event.source = "deterministic_fallback".to_string();
@@ -459,7 +456,7 @@ pub async fn extract_events_orchestrated(
     let storage_dir = match model::get_storage_directory(app) {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("[Inference] Storage directory error: {}. Using fallback.", e);
+            tracing::error!("Storage directory error: {}. Using fallback.", e);
             let mut events = parser::parse_events_deterministic(ocr_text, context);
             for event in &mut events {
                 event.source = "deterministic_fallback".to_string();
@@ -472,7 +469,7 @@ pub async fn extract_events_orchestrated(
     let filename = match model_entry {
         Some(entry) => &entry.filename,
         None => {
-            eprintln!("[Inference] Model ID '{}' not found in manifest. Using fallback.", target_model_id);
+            tracing::warn!("Model ID '{}' not found in manifest. Using fallback.", target_model_id);
             let mut events = parser::parse_events_deterministic(ocr_text, context);
             for event in &mut events {
                 event.source = "deterministic_fallback".to_string();
@@ -483,7 +480,7 @@ pub async fn extract_events_orchestrated(
 
     let model_path = storage_dir.join(filename);
     if !model_path.exists() {
-        eprintln!("[Inference] Model file {:?} does not exist. Using deterministic fallback.", model_path);
+        tracing::info!("Model file {:?} does not exist. Using deterministic fallback.", model_path);
         let mut events = parser::parse_events_deterministic(ocr_text, context);
         for event in &mut events {
             event.source = "deterministic_fallback".to_string();
@@ -492,11 +489,10 @@ pub async fn extract_events_orchestrated(
     }
 
     // Load model
-    let engine = InferenceEngineManager::global();
     let model = match engine.get_or_load_model(target_model_id, &model_path).await {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[Inference] Failed to load model weights: {}. Using fallback.", e);
+            tracing::error!("Failed to load model weights: {}. Using fallback.", e);
             let mut events = parser::parse_events_deterministic(ocr_text, context);
             for event in &mut events {
                 event.source = "deterministic_fallback".to_string();
@@ -514,8 +510,8 @@ pub async fn extract_events_orchestrated(
             let trimmed = raw_json.trim();
             if let Some(events) = parse_llm_json_payload(trimmed) {
                 if !events.is_empty() {
-                    eprintln!(
-                        "[Inference] Successfully extracted {} events via LLM ({}) in {:.2}s",
+                    tracing::info!(
+                        "Successfully extracted {} events via LLM ({}) in {:.2}s",
                         events.len(),
                         target_model_id,
                         start_time.elapsed().as_secs_f32()
@@ -523,8 +519,8 @@ pub async fn extract_events_orchestrated(
                     return events;
                 }
             }
-            eprintln!(
-                "[Inference] Failed to parse LLM output JSON (raw: '{}'). Falling back to deterministic parser.",
+            tracing::warn!(
+                "Failed to parse LLM output JSON (raw: '{}'). Falling back to deterministic parser.",
                 trimmed
             );
             let mut fallback_events = parser::parse_events_deterministic(ocr_text, context);
@@ -534,8 +530,8 @@ pub async fn extract_events_orchestrated(
             fallback_events
         }
         Err(infer_err) => {
-            eprintln!(
-                "[Inference] LLM inference failed / timed out ({:.2}s): {}. Falling back to deterministic parser.",
+            tracing::warn!(
+                "LLM inference failed / timed out ({:.2}s): {}. Falling back to deterministic parser.",
                 start_time.elapsed().as_secs_f32(),
                 infer_err
             );
@@ -551,12 +547,13 @@ pub async fn extract_events_orchestrated(
 /// Convenience single event extraction
 pub async fn extract_event_orchestrated(
     app: &AppHandle,
+    engine: &InferenceEngineManager,
     ocr_text: &str,
     context: &ReferenceContext,
     model_id_override: Option<&str>,
     timeout_secs: Option<u64>,
 ) -> EventDetails {
-    let events = extract_events_orchestrated(app, ocr_text, context, model_id_override, timeout_secs).await;
+    let events = extract_events_orchestrated(app, engine, ocr_text, context, model_id_override, timeout_secs).await;
     events.into_iter().next().unwrap_or_else(|| {
         let mut fallback = parser::parse_event_deterministic(ocr_text, context);
         fallback.source = "deterministic_fallback".to_string();
@@ -665,7 +662,7 @@ mod tests {
         if !model_path.exists() {
             return;
         }
-        let manager = InferenceEngineManager::global();
+        let manager = InferenceEngineManager::new();
         let model = manager
             .get_or_load_model("smollm2-360m-instruct-q4_k_m", &model_path)
             .await
