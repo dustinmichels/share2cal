@@ -47,6 +47,7 @@ import ImagePreviewCard from "./components/ImagePreviewCard.vue";
 import EventPreviewCard from "./components/EventPreviewCard.vue";
 import EventFormCard from "./components/EventFormCard.vue";
 import OcrDrawer from "./components/OcrDrawer.vue";
+import ImageReferenceCard from "./components/ImageReferenceCard.vue";
 import SettingsView from "./components/SettingsView.vue";
 const currentView = ref<"main" | "summary" | "settings">("main");
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
@@ -705,7 +706,7 @@ onUnmounted(() => {
 
 <template>
   <div class="app-layout">
-    <main class="app-container">
+    <main class="app-container" :class="{ 'is-summary-view': currentView === 'summary' }">
       <!-- App Header -->
       <header v-if="currentView === 'main'" class="app-header">
         <button
@@ -951,70 +952,82 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <section
-          v-if="isProcessing"
-          class="surface-card extraction-loading-card"
-          aria-live="polite"
-          aria-busy="true"
-        >
-          <LoaderCircle class="summary-loading-icon" :stroke-width="2" aria-hidden="true" />
-          <div class="loading-copy">
-            <h2 class="section-heading">Scanning and extracting</h2>
-            <p class="section-subheading">Reading the image and building your event summary.</p>
+        <div class="summary-layout-grid">
+          <!-- Side / Mobile Reference Image -->
+          <aside v-if="previewUrl" class="summary-image-column">
+            <ImageReferenceCard :file="selectedFile" :preview-url="previewUrl" />
+          </aside>
+
+          <!-- Extracted Event Cards & Detailed Editor -->
+          <div class="summary-content-column">
+            <section
+              v-if="isProcessing"
+              class="surface-card extraction-loading-card"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <LoaderCircle class="summary-loading-icon" :stroke-width="2" aria-hidden="true" />
+              <div class="loading-copy">
+                <h2 class="section-heading">Scanning and extracting</h2>
+                <p class="section-subheading">Reading the image and building your event summary.</p>
+              </div>
+            </section>
+
+            <!-- PREVIEW VIEW: Event Summary / List of Events -->
+            <EventPreviewCard
+              v-else-if="eventsList.length > 0 && selectedEventIndex === null"
+              v-model:selected-calendar-id="selectedCalendarId"
+              :events="eventsList"
+              :available-calendars="availableCalendars"
+              :default-target="defaultCalendarTarget"
+              :is-adding-to-calendar="isAddingToCalendar"
+              :copied-summary="copiedSummary"
+              :added-indices="addedEventIndices"
+              @edit-event="openEditScreen"
+              @add-to-calendar="handleBatchAddToCalendar"
+              @open-google-calendar="handleOpenGoogleCalendar"
+              @export-ics="handleExportIcs"
+              @copy-summary="copySummary"
+              @remove-event="handleRemoveEvent"
+            />
+
+            <!-- EDIT VIEW: Detailed Event Editing Screen -->
+            <EventFormCard
+              v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
+              v-model="eventForm"
+              v-model:selected-calendar-id="selectedCalendarId"
+              :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
+              :available-calendars="availableCalendars"
+              :default-target="defaultCalendarTarget"
+              :is-adding-to-calendar="isAddingToCalendar"
+              :copied-summary="copiedSummary"
+              :current-index="selectedEventIndex"
+              :total-events="eventsList.length"
+              @back="closeEditScreen"
+              @add-to-calendar="handleSingleAddToCalendar"
+              @open-google-calendar="
+                () => handleOpenGoogleCalendar(selectedEventIndex ?? undefined)
+              "
+              @export-ics="handleSingleExportIcs"
+              @copy-summary="copySingleSummary"
+              @remove="handleRemoveCurrentEvent"
+            />
+
+            <section v-else class="surface-card extraction-empty-card">
+              <h2 class="section-heading">No event summary yet</h2>
+              <p class="section-subheading">
+                Go back to image upload and scan a clearer flyer or screenshot.
+              </p>
+            </section>
+
+            <!-- Collapsible Raw OCR Diagnostics Drawer -->
+            <OcrDrawer
+              v-if="!isProcessing && ocrResult"
+              :ocr-result="ocrResult"
+              @reparse="handleReparse"
+            />
           </div>
-        </section>
-
-        <!-- PREVIEW VIEW: Event Summary / List of Events -->
-        <EventPreviewCard
-          v-else-if="eventsList.length > 0 && selectedEventIndex === null"
-          v-model:selected-calendar-id="selectedCalendarId"
-          :events="eventsList"
-          :available-calendars="availableCalendars"
-          :default-target="defaultCalendarTarget"
-          :is-adding-to-calendar="isAddingToCalendar"
-          :copied-summary="copiedSummary"
-          :added-indices="addedEventIndices"
-          @edit-event="openEditScreen"
-          @add-to-calendar="handleBatchAddToCalendar"
-          @open-google-calendar="handleOpenGoogleCalendar"
-          @export-ics="handleExportIcs"
-          @copy-summary="copySummary"
-          @remove-event="handleRemoveEvent"
-        />
-
-        <!-- EDIT VIEW: Detailed Event Editing Screen -->
-        <EventFormCard
-          v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
-          v-model="eventForm"
-          v-model:selected-calendar-id="selectedCalendarId"
-          :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
-          :available-calendars="availableCalendars"
-          :default-target="defaultCalendarTarget"
-          :is-adding-to-calendar="isAddingToCalendar"
-          :copied-summary="copiedSummary"
-          :current-index="selectedEventIndex"
-          :total-events="eventsList.length"
-          @back="closeEditScreen"
-          @add-to-calendar="handleSingleAddToCalendar"
-          @open-google-calendar="() => handleOpenGoogleCalendar(selectedEventIndex ?? undefined)"
-          @export-ics="handleSingleExportIcs"
-          @copy-summary="copySingleSummary"
-          @remove="handleRemoveCurrentEvent"
-        />
-
-        <section v-else class="surface-card extraction-empty-card">
-          <h2 class="section-heading">No event summary yet</h2>
-          <p class="section-subheading">
-            Go back to image upload and scan a clearer flyer or screenshot.
-          </p>
-        </section>
-
-        <!-- Collapsible Raw OCR Diagnostics Drawer -->
-        <OcrDrawer
-          v-if="!isProcessing && ocrResult"
-          :ocr-result="ocrResult"
-          @reparse="handleReparse"
-        />
+        </div>
       </section>
 
       <!-- VIEW 3: Dedicated Settings Page -->
@@ -1134,6 +1147,19 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 900px) {
+  .app-container.is-summary-view {
+    max-width: 1060px;
+  }
+}
+
+@media (min-width: 1120px) {
+  .app-container.is-summary-view {
+    max-width: 1180px;
+  }
 }
 
 /* Header */
@@ -1221,6 +1247,46 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1.25rem;
   width: 100%;
+}
+
+.summary-layout-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.summary-image-column {
+  width: 100%;
+}
+
+.summary-content-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .summary-layout-grid {
+    display: grid;
+    grid-template-columns: 380px minmax(0, 1fr);
+    align-items: start;
+    gap: 1.5rem;
+  }
+
+  .summary-image-column {
+    position: sticky;
+    top: 1.25rem;
+  }
+}
+
+@media (min-width: 1120px) {
+  .summary-layout-grid {
+    grid-template-columns: 430px minmax(0, 1fr);
+    gap: 1.75rem;
+  }
 }
 
 .summary-nav {

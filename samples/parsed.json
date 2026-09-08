@@ -1,90 +1,84 @@
 {
+  "samples/class.png": [
+    {
+      "title": "CVS-0188 Children and Media Seminar",
+      "date": null,
+      "days": ["Wednesday"],
+      "start_time": "1:20 PM",
+      "end_time": "4:20 PM",
+      "is_all_day": false,
+      "repeating": true,
+      "term": null,
+      "location": "Eliot-Pearson, Room 157",
+      "description": "Faculty: Julie Dobrow | Units: 3.00 | Status: Open / In Cart. (Cross-listed with CSHD 162 and FMS 170) Examination of why children have long been considered a \"special\" audience by broadcasters, advertisers, politicians, educators, and researchers. Critical study of theory and research on children's media use and its effects. Exploration of how media consumption relates to developmental issues, patterns of use, and the content and context of children's media, including television, film/video, advertising, games, podcasts, and social media. Analysis of both theoretical frameworks and empirical evidence to explore topics including gender and ethnic stereotyping, sexual and violent content, educational and \"pro-social\" effects of media, and the links between media use and increases in childhood obesity. Projects, media assessments, research critiques, and an original research proposal."
+    }
+  ],
   "samples/classes.png": [
     {
       "title": "CEE 0154-03 (80513) Principles Epidemiology (Lecture)",
       "date": null,
-      "days": [
-        "Monday",
-        "Wednesday"
-      ],
+      "days": ["Monday", "Wednesday"],
       "start_time": "3:00 PM",
       "end_time": "4:15 PM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Anderson Wing TTC, Room 306",
-      "description": "Faculty: L. Abrams | Units: 3.00 | Status: Action Required / Warning"
+      "description": "Faculty: L. Abrams"
     },
     {
       "title": "CS 0150-09 (84779) Special Topics - Analysis Mthds Images, Text & (Lecture)",
       "date": null,
-      "days": [
-        "Friday"
-      ],
+      "days": ["Friday"],
       "start_time": "2:00 PM",
       "end_time": "4:30 PM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Online",
-      "description": "Faculty: J. Skripchuk | Units: 3.00 | Status: Enrolled"
+      "description": "Faculty: J. Skripchuk"
     },
     {
       "title": "CSHD 0166-01 (82454) Children's Play (Lecture)",
       "date": null,
-      "days": [
-        "Thursday"
-      ],
+      "days": ["Thursday"],
       "start_time": "1:30 PM",
       "end_time": "4:00 PM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Eliot-Pearson, Room 157",
-      "description": "Faculty: W. Scarlett | Units: 3.00 | Status: Enrolled"
+      "description": "Faculty: W. Scarlett"
     },
     {
       "title": "CSHD 0167-01 (80739) Children & Media (Lecture)",
       "date": null,
-      "days": [
-        "Friday"
-      ],
+      "days": ["Friday"],
       "start_time": "9:00 AM",
       "end_time": "11:30 AM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Eaton Hall, 201",
-      "description": "Faculty: J. Dobrow | Units: 3.00 | Status: Enrolled"
+      "description": "Faculty: J. Dobrow"
     },
     {
       "title": "UEP 0254-01 (81300) Quantitative Reasoning (Lecture)",
       "date": null,
-      "days": [
-        "Tuesday",
-        "Thursday"
-      ],
+      "days": ["Tuesday", "Thursday"],
       "start_time": "9:00 AM",
       "end_time": "10:15 AM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Joyce Cummings Center, 302",
-      "description": "Faculty: S. Shamsuddin | Units: 3.00 | Status: Enrolled"
+      "description": "Faculty: S. Shamsuddin"
     },
     {
       "title": "UEP 0262-01 (82571) Solidarity Economy Movements (Seminar)",
       "date": null,
-      "days": [
-        "Tuesday"
-      ],
+      "days": ["Tuesday"],
       "start_time": "12:00 PM",
       "end_time": "2:30 PM",
       "is_all_day": false,
       "repeating": true,
-      "term": "Fall Term 2026",
       "location": "Bromfield-Pearson, Room 006",
-      "description": "Faculty: P. Loh | Units: 3.00 | Status: Enrolled"
+      "description": "Faculty: P. Loh"
     }
   ],
   "samples/gilman_flyer.png": [

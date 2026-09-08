@@ -691,13 +691,15 @@ mod tests {
     #[test]
     fn test_parsed_json_manifest_loads_all_samples() {
         let manifest = load_parsed_json_manifest();
-        assert_eq!(manifest.len(), 5, "parsed.json must contain all 5 sample images");
+        assert_eq!(manifest.len(), 6, "parsed.json must contain all 6 sample images");
+        assert!(manifest.contains_key("samples/class.png"));
         assert!(manifest.contains_key("samples/classes.png"));
         assert!(manifest.contains_key("samples/gilman_flyer.png"));
         assert!(manifest.contains_key("samples/instagram.png"));
         assert!(manifest.contains_key("samples/ride_for_life.png"));
         assert!(manifest.contains_key("samples/squirrel_flower.jpg"));
 
+        assert_eq!(manifest.get("samples/class.png").unwrap().len(), 1);
         assert_eq!(manifest.get("samples/classes.png").unwrap().len(), 6);
         assert_eq!(manifest.get("samples/gilman_flyer.png").unwrap().len(), 1);
         assert_eq!(manifest.get("samples/instagram.png").unwrap().len(), 1);

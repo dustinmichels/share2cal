@@ -1,5 +1,15 @@
 # Parsed Sample Events
 
+## samples/class.png
+
+- **Title:** CVS-0188-01 (83710) Children and Media Seminar (Lecture)
+- **Date/Time:** Wednesdays (We) 1:20 PM – 4:20 PM
+- **Location:** Eliot-Pearson, Room 157
+- **Details:** Faculty: Julie Dobrow | Units: 3.00 | Status: Open / In Cart. (Cross-listed with CSHD 162 and FMS 170) Examination of why children have long been considered a "special" audience by broadcasters, advertisers, politicians, educators, and researchers. Critical study of theory and research on children's media use and its effects. Exploration of how media consumption relates to developmental issues, patterns of use, and the content and context of children's media, including television, film/video, advertising, games, podcasts, and social media. Analysis of both theoretical frameworks and empirical evidence to explore topics including gender and ethnic stereotyping, sexual and violent content, educational and "pro-social" effects of media, and the links between media use and increases in childhood obesity. Projects, media assessments, research critiques, and an original research proposal.
+- **Repeating:** true
+
+---
+
 ## samples/classes.png
 
 ### Event 1
