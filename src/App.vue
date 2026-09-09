@@ -3,7 +3,12 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
 import { ArrowLeft, Settings } from "lucide-vue-next";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { extractTextFromBytes, type OcrResult } from "./services/ocr";
+import {
+  extractTextFromBytes,
+  isWebLink,
+  extractUrlsFromText,
+  type OcrResult,
+} from "./services/ocr";
 import {
   parseEventsFromText,
   downloadIcsFile,
@@ -50,11 +55,13 @@ import OcrDrawer from "./components/OcrDrawer.vue";
 import ImageReferenceCard from "./components/ImageReferenceCard.vue";
 import SettingsView from "./components/SettingsView.vue";
 import MobileFloatingPanel from "./components/MobileFloatingPanel.vue";
+import TextReferenceCard from "./components/TextReferenceCard.vue";
 
 const currentView = ref<"main" | "summary" | "settings">("main");
 const previewMode = ref<"details" | "week">("details");
 const imageRefCard = ref<InstanceType<typeof ImageReferenceCard> | null>(null);
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
+const textRefCard = ref<InstanceType<typeof TextReferenceCard> | null>(null);
 
 function updateParsingMode(mode: ParsingMode) {
   parsingMode.value = mode;
@@ -80,7 +87,8 @@ async function initAutoDownload() {
       updateParsingMode(result.mode);
     }
     if (result.reason === "insufficient_space" && result.error) {
-      errorMessage.value = "Low disk space for AI model. Share2Cal is running in Simple Mode.";
+      errorMessage.value =
+        "Not enough space for the AI model — scans will use fast Simple parsing until space is freed.";
     }
   } catch (err) {
     console.warn("Failed initial model auto-download check:", err);
@@ -95,7 +103,7 @@ const ocrResult = ref<OcrResult | null>(null);
 const eventsList = ref<EventDetails[]>([]);
 const selectedEventIndex = ref<number | null>(null);
 const addedEventIndices = ref<Set<number>>(new Set());
-
+const isReparsingWithLlm = ref(false);
 
 const overallConfidence = computed(() => {
   if (eventsList.value.length === 0) return 0;
@@ -159,15 +167,33 @@ function handleWindowDragLeave(event: DragEvent) {
   }
 }
 
-function handleWindowDrop(event: DragEvent) {
+async function handleWindowDrop(event: DragEvent) {
   event.preventDefault();
   isWindowDragging.value = false;
   const files = event.dataTransfer?.files;
   if (files && files.length > 0) {
+    const file = files[0];
+    if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+      try {
+        const text = await file.text();
+        if (text && text.trim()) {
+          await handlePastedText(text.trim());
+          return;
+        }
+      } catch {
+        // Fallback to setImageFile
+      }
+    }
     if (currentView.value !== "main") {
       currentView.value = "main";
     }
     setImageFile(files[0]);
+    return;
+  }
+
+  const text = event.dataTransfer?.getData("text");
+  if (text && text.trim()) {
+    await handlePastedText(text.trim());
   }
 }
 
@@ -206,6 +232,7 @@ const eventForm = ref<EventFormData>({
   isAllDay: false,
   location: "",
   description: "",
+  url: "",
   recurrenceRule: "",
 });
 
@@ -323,18 +350,164 @@ function triggerCameraCapture() {
   cameraInputRef.value?.click();
 }
 
-function handlePaste(event: ClipboardEvent) {
-  const items = event.clipboardData?.items;
-  if (!items) return;
+async function handlePaste(event: ClipboardEvent) {
+  const target = event.target as HTMLElement | null;
+  if (
+    target &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable)
+  ) {
+    return;
+  }
 
-  for (let i = 0; i < items.length; i++) {
-    if (items[i].type.startsWith("image/")) {
-      const file = items[i].getAsFile();
-      if (file) {
-        setImageFile(file);
-        break;
+  const items = event.clipboardData?.items;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) {
+          setImageFile(file);
+          return;
+        }
       }
     }
+  }
+
+  const text = event.clipboardData?.getData("text/plain")?.trim();
+  if (text) {
+    event.preventDefault();
+    await handlePastedText(text);
+  }
+}
+
+async function processExtractedText(rawText: string, qrCodes?: string[]) {
+  if (!rawText.trim() && (!qrCodes || qrCodes.length === 0)) {
+    errorMessage.value = "No event text was detected. Please try another photo or paste clearer text.";
+    return;
+  }
+
+  const extractedUrls = extractUrlsFromText(rawText);
+  const combinedQrs = Array.from(new Set([...(qrCodes || []), ...extractedUrls]));
+
+  const res: OcrResult = {
+    text: rawText,
+    lines: rawText.split("\n").map((line) => ({ text: line, confidence: 1.0 })),
+    qr_codes: combinedQrs,
+  };
+  ocrResult.value = res;
+
+  const hasText = Boolean(rawText && rawText.trim());
+  const hasQr = combinedQrs.length > 0;
+  const qrSection = hasQr ? `Links / QR Codes:\n${combinedQrs.join("\n")}` : "";
+  const textToParse = hasText
+    ? (hasQr ? `${rawText.trim()}\n\n${qrSection}` : rawText.trim())
+    : `Event\n${qrSection}`;
+
+  // 1. Simple parsing: immediate, fast rule-based extraction
+  const simpleParsed = await parseEventsFromText(
+    textToParse,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    "simple",
+  );
+
+  if (combinedQrs.length > 0) {
+    const webUrl = combinedQrs.find(isWebLink);
+    if (webUrl) {
+      for (const ev of simpleParsed) {
+        if (!ev.url) {
+          ev.url = webUrl.trim();
+        }
+      }
+    }
+  }
+
+  eventsList.value = simpleParsed;
+  currentView.value = "summary";
+  isProcessing.value = false;
+
+  // 2. Enhanced parsing: progressive AI refinement if mode is not simple
+  if (parsingMode.value !== "simple") {
+    isReparsingWithLlm.value = true;
+    try {
+      if (isTauri()) {
+        try {
+          const statuses = await getModelStatuses();
+          const defaultModel = statuses.find((m) => m.is_default) || statuses[0];
+          if (defaultModel && !defaultModel.is_downloaded) {
+            isReparsingWithLlm.value = false;
+            return;
+          }
+        } catch {
+          // Continue to parseEventsFromText
+        }
+      }
+
+      const enhancedParsed = await parseEventsFromText(
+        textToParse,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "enhanced",
+      );
+
+      if (enhancedParsed && enhancedParsed.length > 0) {
+        if (combinedQrs.length > 0) {
+          const webUrl = combinedQrs.find(isWebLink);
+          if (webUrl) {
+            for (const ev of enhancedParsed) {
+              if (!ev.url) {
+                ev.url = webUrl.trim();
+              }
+            }
+          }
+        }
+        eventsList.value = enhancedParsed;
+        addedEventIndices.value = new Set();
+        if (selectedEventIndex.value !== null && enhancedParsed[selectedEventIndex.value]) {
+          syncFormFromEvent(enhancedParsed[selectedEventIndex.value]);
+        }
+      }
+    } catch (enhanceErr) {
+      console.warn("Enhanced parsing step failed; keeping simple parsing results:", enhanceErr);
+    } finally {
+      isReparsingWithLlm.value = false;
+    }
+  }
+}
+
+async function handlePastedText(text: string) {
+  if (!text || !text.trim()) {
+    errorMessage.value = "Please provide some text containing event details.";
+    return;
+  }
+
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value);
+  }
+  selectedFile.value = null;
+  previewUrl.value = null;
+  errorMessage.value = null;
+  isProcessing.value = true;
+  calendarDownloaded.value = false;
+  eventsList.value = [];
+  selectedEventIndex.value = null;
+  addedEventIndices.value = new Set();
+
+  try {
+    await processExtractedText(text.trim());
+  } catch (err: unknown) {
+    errorMessage.value =
+      err instanceof Error
+        ? err.message
+        : String(err) || "Failed to parse events from pasted text.";
+    currentView.value = "main";
+  } finally {
+    isProcessing.value = false;
   }
 }
 
@@ -353,26 +526,14 @@ async function handleGo() {
     const arrayBuffer = await selectedFile.value.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     const res = await extractTextFromBytes(bytes);
-    ocrResult.value = res;
 
-    if (!res.text.trim()) {
+    if (!res.text.trim() && (!res.qr_codes || res.qr_codes.length === 0)) {
       errorMessage.value =
-        "No text was detected in this image. Try another photo with clearer text.";
+        "No text or QR code was detected in this image. Try another photo with clearer text.";
       return;
     }
 
-    // Parse multiple or single event details from the extracted OCR text
-    const parsed = await parseEventsFromText(
-      res.text,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      parsingMode.value,
-    );
-    eventsList.value = parsed;
-    // Once parsing finishes, navigate to the next screen!
-    currentView.value = "summary";
+    await processExtractedText(res.text, res.qr_codes);
   } catch (err: unknown) {
     errorMessage.value =
       err instanceof Error
@@ -382,24 +543,91 @@ async function handleGo() {
     isProcessing.value = false;
   }
 }
-async function handleReparse() {
-  if (!ocrResult.value?.text) return;
+async function handleTryAgain() {
+  if (!ocrResult.value) return;
+  const rawText = ocrResult.value.text?.trim() || "";
+  const qrCodes = ocrResult.value.qr_codes || [];
+  if (!rawText && qrCodes.length === 0) return;
+
+  const hasText = Boolean(rawText);
+  const hasQr = qrCodes.length > 0;
+  const qrSection = hasQr ? `Links / QR Codes:\n${qrCodes.join("\n")}` : "";
+  const textToParse = hasText
+    ? (hasQr ? `${rawText}\n\n${qrSection}` : rawText)
+    : `Event\n${qrSection}`;
+
+  isReparsingWithLlm.value = true;
+  errorMessage.value = null;
+
   try {
+    if (isTauri()) {
+      try {
+        const statuses = await getModelStatuses();
+        const defaultModel = statuses.find((m) => m.is_default) || statuses[0];
+        if (defaultModel && !defaultModel.is_downloaded) {
+          if (defaultModel.is_downloading) {
+            errorMessage.value =
+              "AI model is currently downloading. Please wait a moment for the download to finish, then tap Try again.";
+            return;
+          } else {
+            await checkDiskSpaceAndAutoDownloadDefaultModel();
+            errorMessage.value =
+              "AI model download has been started. Please wait a moment and tap Try again once ready.";
+            return;
+          }
+        }
+      } catch (statusErr) {
+        console.warn("Could not check model status before reparsing:", statusErr);
+      }
+    }
+
     const parsed = await parseEventsFromText(
-      ocrResult.value.text,
+      textToParse,
       undefined,
       undefined,
       undefined,
       undefined,
-      parsingMode.value,
+      "enhanced",
     );
+
+    if (qrCodes.length > 0) {
+      const webUrl = qrCodes.find(isWebLink);
+      if (webUrl) {
+        for (const ev of parsed) {
+          if (!ev.url) {
+            ev.url = webUrl.trim();
+          }
+        }
+      }
+    }
+
     eventsList.value = parsed;
-    selectedEventIndex.value = null;
     addedEventIndices.value = new Set();
+
+    if (selectedEventIndex.value !== null && parsed[selectedEventIndex.value]) {
+      const updatedEvent = parsed[selectedEventIndex.value];
+      eventForm.value = {
+        title: updatedEvent.title || "",
+        date: extractDateInput(updatedEvent.start_time),
+        startTime: extractTimeInput(updatedEvent.start_time) || "09:00",
+        endTime: extractTimeInput(updatedEvent.end_time) || "10:00",
+        isAllDay: updatedEvent.is_all_day,
+        location: updatedEvent.location || "",
+        description: updatedEvent.description || "",
+        url: updatedEvent.url || "",
+        recurrenceRule: updatedEvent.recurrence_rule || undefined,
+      };
+    }
   } catch (err: unknown) {
     errorMessage.value =
-      err instanceof Error ? err.message : String(err) || "Failed to re-parse event details.";
+      err instanceof Error ? err.message : String(err) || "Failed to re-parse with AI model.";
+  } finally {
+    isReparsingWithLlm.value = false;
   }
+}
+
+async function handleReparse() {
+  await handleTryAgain();
 }
 
 function getComposedEvent(): EventDetails {
@@ -572,6 +800,7 @@ async function copySummary() {
         : `Date & Time: ${formatDateForDisplay(event.start_time)} (${formatTimeForDisplay(event.start_time)} - ${formatTimeForDisplay(event.end_time)})`,
     );
     if (event.location) lines.push(`📍 Location: ${event.location}`);
+    if (event.url) lines.push(`🔗 Link: ${event.url}`);
     if (event.description) lines.push(`📝 Notes: ${event.description}`);
   } else {
     lines.push(`📋 Schedule Summary (${eventsList.value.length} Events)`);
@@ -584,6 +813,7 @@ async function copySummary() {
           : `   Time: ${formatDateForDisplay(ev.start_time)} (${formatTimeForDisplay(ev.start_time)} - ${formatTimeForDisplay(ev.end_time)})`,
       );
       if (ev.location) lines.push(`   Location: ${ev.location}`);
+      if (ev.url) lines.push(`   Link: ${ev.url}`);
       if (ev.description) lines.push(`   Notes: ${ev.description}`);
       lines.push("");
     });
@@ -609,8 +839,8 @@ async function copySingleSummary() {
       : `Date & Time: ${eventForm.value.date} (${eventForm.value.startTime} - ${eventForm.value.endTime})`,
   ];
   if (event.location) lines.push(`📍 Location: ${event.location}`);
+  if (event.url) lines.push(`🔗 Link: ${event.url}`);
   if (event.description) lines.push(`📝 Notes: ${event.description}`);
-
   try {
     await navigator.clipboard.writeText(lines.join("\n"));
     copiedSummary.value = true;
@@ -683,8 +913,8 @@ onMounted(async () => {
       } else if (payload.status === "error") {
         const errLower = (payload.error || "").toLowerCase();
         if (errLower.includes("insufficient disk space") || errLower.includes("disk space")) {
-          updateParsingMode("simple");
-          errorMessage.value = "Insufficient disk space for AI model. Switched to Simple Mode.";
+          errorMessage.value =
+            "Not enough space for the AI model — scans will use fast Simple parsing until space is freed.";
         }
         refreshModelStatus();
       }
@@ -693,7 +923,8 @@ onMounted(async () => {
     console.warn("Could not register model download progress listener in App:", err);
   }
 
-  await initAutoDownload();
+  // Start installing the default tiny LLM right away in the background
+  void initAutoDownload();
 });
 
 onUnmounted(() => {
@@ -934,16 +1165,18 @@ onUnmounted(() => {
             @select-file="setImageFile"
             @choose-file="triggerFileUpload"
             @take-photo="triggerCameraCapture"
+            @paste-text="handlePastedText"
           />
         </div>
 
-        <section v-else class="content-flow">
+        <section v-else-if="selectedFile" class="content-flow">
           <ImagePreviewCard
             :file="selectedFile"
             :preview-url="previewUrl"
             :is-processing="isProcessing"
             :is-from-share-extension="isFromShareExtension"
             :has-event="eventsList.length > 0"
+            :qr-codes="ocrResult?.qr_codes"
             @scan="handleGo"
             @remove="handleReset"
             @choose-another="triggerFileUpload"
@@ -959,12 +1192,14 @@ onUnmounted(() => {
           <MobileFloatingPanel
             v-model:view-mode="previewMode"
             :preview-url="previewUrl"
+            :raw-text="ocrResult?.text"
             :file-name="selectedFile?.name"
             :total-events="eventsList.length"
             :overall-confidence="overallConfidence"
             :is-editing="selectedEventIndex !== null"
             @back="currentView = 'main'"
             @open-image-modal="imageRefCard?.openModal()"
+            @open-text-modal="textRefCard?.openModal()"
           >
             <!-- PREVIEW VIEW: Event Summary / List of Events -->
             <EventPreviewCard
@@ -976,6 +1211,7 @@ onUnmounted(() => {
               :default-target="defaultCalendarTarget"
               :hide-header="true"
               :is-adding-to-calendar="isAddingToCalendar"
+              :is-reparsing="isReparsingWithLlm"
               :copied-summary="copiedSummary"
               :added-indices="addedEventIndices"
               @edit-event="openEditScreen"
@@ -983,6 +1219,7 @@ onUnmounted(() => {
               @open-google-calendar="handleOpenGoogleCalendar"
               @export-ics="handleExportIcs"
               @copy-summary="copySummary"
+              @try-again="handleTryAgain"
               @remove-event="handleRemoveEvent"
             />
 
@@ -995,6 +1232,7 @@ onUnmounted(() => {
               :available-calendars="availableCalendars"
               :default-target="defaultCalendarTarget"
               :is-adding-to-calendar="isAddingToCalendar"
+              :is-reparsing="isReparsingWithLlm"
               :copied-summary="copiedSummary"
               :current-index="selectedEventIndex"
               :total-events="eventsList.length"
@@ -1005,14 +1243,45 @@ onUnmounted(() => {
               "
               @export-ics="handleSingleExportIcs"
               @copy-summary="copySingleSummary"
+              @try-again="handleTryAgain"
               @remove="handleRemoveCurrentEvent"
             />
 
             <section v-else class="surface-card extraction-empty-card">
               <h2 class="section-heading">No event summary yet</h2>
               <p class="section-subheading">
-                Go back to image upload and scan a clearer flyer or screenshot.
+                Simple parsing did not detect events. Try again with the AI model, or scan a clearer flyer.
               </p>
+              <div class="empty-card-actions">
+                <button
+                  type="button"
+                  class="btn-touch btn-touch-calendar"
+                  :disabled="isReparsingWithLlm"
+                  @click="handleTryAgain"
+                >
+                  <template v-if="isReparsingWithLlm">
+                    <div class="spinner-circle spinner-light"></div>
+                    <span>Trying again...</span>
+                  </template>
+                  <template v-else>
+                    <svg
+                      class="btn-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                      <path d="M3 3v5h5"></path>
+                      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                      <path d="M16 21h5v-5"></path>
+                    </svg>
+                    <span>Try again</span>
+                  </template>
+                </button>
+              </div>
             </section>
 
             <!-- Collapsible Raw OCR Diagnostics Drawer -->
@@ -1033,7 +1302,7 @@ onUnmounted(() => {
               @click="currentView = 'main'"
             >
               <ArrowLeft class="btn-icon" :stroke-width="2.2" />
-              <span>Back to image upload</span>
+              <span>{{ previewUrl ? "Back to image upload" : "Back to upload" }}</span>
             </button>
           </div>
 
@@ -1044,6 +1313,16 @@ onUnmounted(() => {
                 ref="imageRefCard"
                 :file="selectedFile"
                 :preview-url="previewUrl"
+                :qr-codes="ocrResult?.qr_codes"
+              />
+            </aside>
+
+            <!-- Side Reference Text Column -->
+            <aside v-else-if="ocrResult?.text" class="summary-image-column">
+              <TextReferenceCard
+                ref="textRefCard"
+                :text="ocrResult.text"
+                :qr-codes="ocrResult?.qr_codes"
               />
             </aside>
 
@@ -1058,6 +1337,7 @@ onUnmounted(() => {
                 :available-calendars="availableCalendars"
                 :default-target="defaultCalendarTarget"
                 :is-adding-to-calendar="isAddingToCalendar"
+                :is-reparsing="isReparsingWithLlm"
                 :copied-summary="copiedSummary"
                 :added-indices="addedEventIndices"
                 @edit-event="openEditScreen"
@@ -1065,6 +1345,7 @@ onUnmounted(() => {
                 @open-google-calendar="handleOpenGoogleCalendar"
                 @export-ics="handleExportIcs"
                 @copy-summary="copySummary"
+                @try-again="handleTryAgain"
                 @remove-event="handleRemoveEvent"
               />
 
@@ -1077,6 +1358,7 @@ onUnmounted(() => {
                 :available-calendars="availableCalendars"
                 :default-target="defaultCalendarTarget"
                 :is-adding-to-calendar="isAddingToCalendar"
+                :is-reparsing="isReparsingWithLlm"
                 :copied-summary="copiedSummary"
                 :current-index="selectedEventIndex"
                 :total-events="eventsList.length"
@@ -1087,14 +1369,45 @@ onUnmounted(() => {
                 "
                 @export-ics="handleSingleExportIcs"
                 @copy-summary="copySingleSummary"
+                @try-again="handleTryAgain"
                 @remove="handleRemoveCurrentEvent"
               />
 
               <section v-else class="surface-card extraction-empty-card">
                 <h2 class="section-heading">No event summary yet</h2>
                 <p class="section-subheading">
-                  Go back to image upload and scan a clearer flyer or screenshot.
+                  Simple parsing did not detect events. Try again with the AI model, or scan a clearer flyer.
                 </p>
+                <div class="empty-card-actions">
+                  <button
+                    type="button"
+                    class="btn-touch btn-touch-calendar"
+                    :disabled="isReparsingWithLlm"
+                    @click="handleTryAgain"
+                  >
+                    <template v-if="isReparsingWithLlm">
+                      <div class="spinner-circle spinner-light"></div>
+                      <span>Trying again...</span>
+                    </template>
+                    <template v-else>
+                      <svg
+                        class="btn-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                        <path d="M3 3v5h5"></path>
+                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                        <path d="M16 21h5v-5"></path>
+                      </svg>
+                      <span>Try again</span>
+                    </template>
+                  </button>
+                </div>
               </section>
 
               <!-- Collapsible Raw OCR Diagnostics Drawer -->

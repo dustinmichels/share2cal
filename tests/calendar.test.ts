@@ -199,6 +199,42 @@ describe("Calendar Service & Google Calendar Integration", () => {
       expect(url.searchParams.get("location")).toBe("Boston, MA");
       expect(url.searchParams.get("details")).toContain("RIDE. WALK. RALLY.");
     });
+
+    it("includes event URL in details parameter when url is provided", () => {
+      const event: EventDetails = {
+        title: "Webinar: Campus as Commons",
+        start_time: "2026-09-10T12:00:00Z",
+        end_time: "2026-09-10T13:00:00Z",
+        is_all_day: false,
+        location: "Curtis Hall",
+        description: "Visiting Artist lecture and Q&A.",
+        url: "https://tufts.zoom.us/webinar/register/WN_123",
+        confidence: 0.95,
+        source: "qr_scan",
+      };
+      const urlString = generateGoogleCalendarUrl(event);
+      const url = new URL(urlString);
+      const details = url.searchParams.get("details");
+      expect(details).toContain("Visiting Artist lecture and Q&A.");
+      expect(details).toContain("https://tufts.zoom.us/webinar/register/WN_123");
+    });
+
+    it("does not duplicate url if already present in description", () => {
+      const event: EventDetails = {
+        title: "Webinar with link in description",
+        start_time: "2026-09-10T12:00:00Z",
+        end_time: "2026-09-10T13:00:00Z",
+        is_all_day: false,
+        description: "Join at https://zoom.us/j/999 for details.",
+        url: "https://zoom.us/j/999",
+        confidence: 0.95,
+        source: "ocr",
+      };
+      const urlString = generateGoogleCalendarUrl(event);
+      const url = new URL(urlString);
+      const details = url.searchParams.get("details");
+      expect(details).toBe("Join at https://zoom.us/j/999 for details.");
+    });
   });
 
   describe("Settings & Calendar Preferences Persistence", () => {

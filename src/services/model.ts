@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getStoredParsingMode, setStoredParsingMode, type ParsingMode } from "./settings";
+import { getStoredParsingMode, type ParsingMode } from "./settings";
 export interface ModelManifestEntry {
   id: string;
   name: string;
@@ -231,6 +231,12 @@ export function isDesktopDevice(): boolean {
 }
 
 /**
+ * Detects if the current running environment is a mobile platform (iOS, Android).
+ */
+export function isMobileDevice(): boolean {
+  return !isDesktopDevice();
+}
+/**
  * Subscribes to model download progress events emitted by the native Rust backend.
  */
 export async function onModelDownloadProgress(
@@ -281,8 +287,8 @@ export interface AutoDownloadResult {
 /**
  * Checks if the device has sufficient disk space for the default LLM (requires >= 1.5x model size).
  * If in enhanced mode and the default model is not yet downloaded:
- * - If space is sufficient, initiates background download of the default LLM immediately.
- * - If space is insufficient, switches parsing mode to 'simple' fallback and persists it.
+ * - If space is sufficient, initiates background download of the default LLM right away.
+ * - If space is insufficient, the mode remains 'enhanced' and scans fall back to 'simple' dynamically per-scan.
  */
 export async function checkDiskSpaceAndAutoDownloadDefaultModel(): Promise<AutoDownloadResult> {
   const currentMode = getStoredParsingMode();
@@ -329,10 +335,9 @@ export async function checkDiskSpaceAndAutoDownloadDefaultModel(): Promise<AutoD
     const freeBytes = storageInfo?.free_disk_space_bytes;
 
     if (typeof freeBytes === "number" && freeBytes < requiredBytes) {
-      setStoredParsingMode("simple");
       return {
         triggered: false,
-        mode: "simple",
+        mode: "enhanced",
         modelId: defaultModel.id,
         reason: "insufficient_space",
         freeBytes,
@@ -341,43 +346,18 @@ export async function checkDiskSpaceAndAutoDownloadDefaultModel(): Promise<AutoD
       };
     }
 
-    try {
-      await downloadModel(defaultModel.id);
-      return {
-        triggered: true,
-        mode: "enhanced",
-        modelId: defaultModel.id,
-        reason: "download_started",
-        freeBytes: freeBytes ?? null,
-        requiredBytes,
-      };
-    } catch (downloadErr: unknown) {
-      const errMsg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
-      const isSpaceErr =
-        errMsg.toLowerCase().includes("insufficient disk space") ||
-        errMsg.toLowerCase().includes("disk space");
-
-      if (isSpaceErr) {
-        setStoredParsingMode("simple");
-        return {
-          triggered: false,
-          mode: "simple",
-          modelId: defaultModel.id,
-          reason: "insufficient_space",
-          freeBytes: freeBytes ?? null,
-          requiredBytes,
-          error: errMsg,
-        };
-      }
-
-      return {
-        triggered: false,
-        mode: "enhanced",
-        modelId: defaultModel.id,
-        reason: "error",
-        error: errMsg,
-      };
-    }
+    // Initiate download in background right away without blocking the caller
+    downloadModel(defaultModel.id).catch((err: unknown) => {
+      console.warn("Background default model download error:", err);
+    });
+    return {
+      triggered: true,
+      mode: "enhanced",
+      modelId: defaultModel.id,
+      reason: "download_started",
+      freeBytes: freeBytes ?? null,
+      requiredBytes,
+    };
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.warn("Failed to check disk space and auto-download default model:", err);

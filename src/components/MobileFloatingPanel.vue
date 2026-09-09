@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from "vue";
-import { ChevronUp, ChevronDown, List, Calendar as CalendarIcon, ArrowLeft, Maximize2 } from "lucide-vue-next";
+import {
+  ChevronUp,
+  ChevronDown,
+  List,
+  Calendar as CalendarIcon,
+  ArrowLeft,
+  Maximize2,
+  FileText,
+} from "lucide-vue-next";
 
 const props = withDefaults(
   defineProps<{
     previewUrl: string | null;
+    rawText?: string;
     fileName?: string;
     totalEvents: number;
     overallConfidence?: number;
@@ -28,6 +37,7 @@ watch(
 const emit = defineEmits<{
   (e: "back"): void;
   (e: "openImageModal"): void;
+  (e: "openTextModal"): void;
 }>();
 
 const viewMode = defineModel<"details" | "week">("viewMode", { default: "details" });
@@ -56,18 +66,15 @@ function toggleSheet() {
   sheetState.value = sheetState.value === "half" ? "expanded" : "half";
 }
 
-function handleZoneClick() {
-  if (hasMoved.value) {
-    hasMoved.value = false;
-    return;
-  }
-  toggleSheet();
-}
 function startDrag(clientY: number) {
-  isDragging.value = true;
+  isDragging.value = false;
   hasMoved.value = false;
   startY.value = clientY;
-  startHeight.value = sheetRef.value ? sheetRef.value.offsetHeight : getHalfHeightPx();
+  startHeight.value = sheetRef.value
+    ? sheetRef.value.offsetHeight
+    : sheetState.value === "half"
+      ? getHalfHeightPx()
+      : getExpandedHeightPx();
   currentDragHeight.value = null;
 
   window.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -89,38 +96,40 @@ function handleMouseDown(e: MouseEvent) {
 }
 
 function updateDrag(clientY: number) {
-  if (!isDragging.value) return;
   const deltaY = startY.value - clientY; // dragging UP increases height
-  if (Math.abs(deltaY) >= 6) {
+  if (!hasMoved.value) {
+    if (Math.abs(deltaY) < 8) {
+      return;
+    }
     hasMoved.value = true;
+    isDragging.value = true;
   }
-  if (!hasMoved.value) return;
   const minH = window.innerHeight * 0.35;
   const maxH = window.innerHeight * 0.95;
   const targetH = Math.min(maxH, Math.max(minH, startHeight.value + deltaY));
   currentDragHeight.value = targetH;
 }
+
 function onTouchMove(e: TouchEvent) {
-  if (!isDragging.value) return;
-  e.preventDefault();
-  updateDrag(e.touches[0].clientY);
+  if (e.touches.length === 1) {
+    updateDrag(e.touches[0].clientY);
+    if (isDragging.value && e.cancelable) {
+      e.preventDefault();
+    }
+  }
 }
 
 function onMouseMove(e: MouseEvent) {
-  if (!isDragging.value) return;
   updateDrag(e.clientY);
 }
 
 function endDrag() {
-  if (!isDragging.value) return;
-  isDragging.value = false;
-
   window.removeEventListener("touchmove", onTouchMove);
   window.removeEventListener("touchend", onTouchEnd);
   window.removeEventListener("mousemove", onMouseMove);
   window.removeEventListener("mouseup", onMouseUp);
 
-  if (currentDragHeight.value !== null) {
+  if (isDragging.value && currentDragHeight.value !== null) {
     const halfH = getHalfHeightPx();
     const expandedH = getExpandedHeightPx();
     const currentH = currentDragHeight.value;
@@ -132,7 +141,9 @@ function endDrag() {
       sheetState.value = "half";
     }
   }
+  isDragging.value = false;
   currentDragHeight.value = null;
+  hasMoved.value = false;
 }
 
 function onTouchEnd() {
@@ -142,7 +153,6 @@ function onTouchEnd() {
 function onMouseUp() {
   endDrag();
 }
-
 onUnmounted(() => {
   window.removeEventListener("touchmove", onTouchMove);
   window.removeEventListener("touchend", onTouchEnd);
@@ -160,7 +170,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="btn-floating-nav"
-          aria-label="Back to image upload"
+          :aria-label="previewUrl ? 'Back to image upload' : 'Back to upload'"
           @click="emit('back')"
         >
           <ArrowLeft class="nav-icon" :stroke-width="2.2" />
@@ -176,6 +186,17 @@ onUnmounted(() => {
           @click="emit('openImageModal')"
         >
           <Maximize2 class="nav-icon" :stroke-width="2.2" />
+        </button>
+
+        <button
+          v-else-if="rawText"
+          type="button"
+          class="btn-floating-nav btn-floating-nav-icon"
+          aria-label="View source text"
+          title="View source text"
+          @click="emit('openTextModal')"
+        >
+          <FileText class="nav-icon" :stroke-width="2.2" />
         </button>
       </div>
 
@@ -193,6 +214,23 @@ onUnmounted(() => {
           <span>Tap image to zoom</span>
         </div>
       </div>
+
+      <!-- Main Text Snippet Stage (when text was pasted without image) -->
+      <div
+        v-else-if="rawText"
+        class="flyer-text-stage-container"
+        role="button"
+        tabindex="0"
+        aria-label="View original source text"
+        @click="emit('openTextModal')"
+      >
+        <div class="flyer-text-bubble">
+          <p class="flyer-text-snippet">{{ rawText }}</p>
+        </div>
+        <div class="tap-hint-pill" aria-hidden="true">
+          <span>Tap to view full text</span>
+        </div>
+      </div>
     </div>
 
     <!-- DRAGGABLE FLOATING BOTTOM PANEL -->
@@ -200,8 +238,8 @@ onUnmounted(() => {
       ref="sheetRef"
       class="floating-bottom-panel"
       :class="{
-        'is-half': sheetState === 'half' && !isDragging,
-        'is-expanded': sheetState === 'expanded' && !isDragging,
+        'is-half': sheetState === 'half',
+        'is-expanded': sheetState === 'expanded',
         'is-dragging': isDragging,
       }"
       :style="currentDragHeight ? { height: `${currentDragHeight}px` } : undefined"
@@ -210,18 +248,20 @@ onUnmounted(() => {
       <!-- Drag Handle & Header -->
       <div
         class="panel-drag-zone"
-        role="button"
-        tabindex="0"
         :aria-expanded="sheetState === 'expanded'"
         aria-label="Drag up to cover image, or drag down to view both at once"
         @touchstart="handleTouchStart"
         @mousedown="handleMouseDown"
-        @click="handleZoneClick"
-        @keydown.enter="toggleSheet"
-        @keydown.space.prevent="toggleSheet"
       >
-        <div class="drag-handle-pill" aria-hidden="true"></div>
-
+        <div
+          class="drag-handle-pill"
+          role="button"
+          tabindex="0"
+          :aria-label="sheetState === 'expanded' ? 'Collapse panel' : 'Expand panel'"
+          @click.stop="toggleSheet"
+          @keydown.enter.prevent="toggleSheet"
+          @keydown.space.prevent="toggleSheet"
+        ></div>
         <div class="panel-header-row">
           <div class="panel-meta-info">
             <span class="panel-event-count">
@@ -237,6 +277,8 @@ onUnmounted(() => {
             class="panel-toggle-indicator"
             :aria-label="sheetState === 'expanded' ? 'Collapse panel' : 'Expand panel'"
             @click.stop="toggleSheet"
+            @touchstart.stop
+            @mousedown.stop
           >
             <ChevronDown v-if="sheetState === 'expanded'" class="indicator-icon" />
             <ChevronUp v-else class="indicator-icon" />
@@ -249,6 +291,8 @@ onUnmounted(() => {
           role="tablist"
           aria-label="Switch between detail view and calendar view"
           @click.stop
+          @touchstart.stop
+          @mousedown.stop
         >
           <button
             type="button"
@@ -402,6 +446,45 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.flyer-text-stage-container {
+  position: relative;
+  width: 100%;
+  height: 52vh;
+  height: 52dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3.5rem 1.25rem 1.25rem 1.25rem;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.flyer-text-bubble {
+  width: 100%;
+  max-width: 420px;
+  max-height: 80%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 14px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.flyer-text-snippet {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Floating Bottom Panel */
 .floating-bottom-panel {
   position: absolute;
@@ -434,7 +517,7 @@ onUnmounted(() => {
 }
 
 .floating-bottom-panel.is-dragging {
-  transition: none;
+  transition: none !important;
 }
 
 /* Drag Zone & Header */
@@ -461,11 +544,18 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--text-tertiary);
   opacity: 0.5;
-  transition: opacity 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  cursor: pointer;
+  padding: 4px 0;
+  box-sizing: content-box;
 }
 
-.panel-drag-zone:hover .drag-handle-pill {
-  opacity: 0.8;
+.drag-handle-pill:hover,
+.drag-handle-pill:focus-visible {
+  opacity: 0.9;
+  transform: scale(1.05);
 }
 
 .panel-header-row {

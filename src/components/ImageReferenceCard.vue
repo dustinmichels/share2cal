@@ -1,12 +1,45 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { Image as ImageIcon, Maximize2, ZoomIn, ZoomOut, RotateCcw, X, Eye } from "lucide-vue-next";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { isWebLink } from "../services/ocr";
 
 const props = defineProps<{
   file?: File | null;
   previewUrl: string | null;
+  qrCodes?: string[];
 }>();
 
+async function handleOpenUrl(e: MouseEvent, url: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await openUrl(url);
+  } catch {
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
+  }
+}
+const copiedQrIdx = ref<number | null>(null);
+let copiedQrTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function handleCopyUrl(e: MouseEvent, url: string, index: number) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    }
+    copiedQrIdx.value = index;
+    if (copiedQrTimer) clearTimeout(copiedQrTimer);
+    copiedQrTimer = setTimeout(() => {
+      copiedQrIdx.value = null;
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy QR code URL to clipboard:", err);
+  }
+}
 const isModalOpen = ref(false);
 const zoomLevel = ref(1);
 const isDragging = ref(false);
@@ -81,6 +114,20 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+const touchStartY = ref(0);
+const touchStartX = ref(0);
+let lastTapTime = 0;
+
+function handleStageClick(e: MouseEvent) {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  // If clicking directly on the image, don't close
+  if (target.tagName === "IMG") {
+    return;
+  }
+  closeModal();
+}
+
 function startPan(e: MouseEvent | TouchEvent) {
   if (zoomLevel.value <= 1) return;
   isDragging.value = true;
@@ -90,6 +137,14 @@ function startPan(e: MouseEvent | TouchEvent) {
     x: clientX - panOffset.value.x,
     y: clientY - panOffset.value.y,
   };
+}
+
+function handleTouchStart(e: TouchEvent) {
+  if (e.touches.length === 1) {
+    touchStartX.value = e.touches[0].clientX;
+    touchStartY.value = e.touches[0].clientY;
+  }
+  startPan(e);
 }
 
 function onPan(e: MouseEvent | TouchEvent) {
@@ -102,8 +157,32 @@ function onPan(e: MouseEvent | TouchEvent) {
   };
 }
 
+function handleTouchMove(e: TouchEvent) {
+  if (e.touches.length === 1 && zoomLevel.value <= 1) {
+    const deltaY = e.touches[0].clientY - touchStartY.value;
+    const deltaX = Math.abs(e.touches[0].clientX - touchStartX.value);
+    // Swiping down on mobile to dismiss modal
+    if (deltaY > 75 && deltaY > deltaX * 1.5) {
+      closeModal();
+      return;
+    }
+  }
+  onPan(e);
+}
+
 function endPan() {
   isDragging.value = false;
+}
+
+function handleTouchEnd() {
+  const now = Date.now();
+  if (now - lastTapTime < 300) {
+    toggleDoubleTapZoom();
+    lastTapTime = 0;
+  } else {
+    lastTapTime = now;
+  }
+  endPan();
 }
 
 onMounted(() => {
@@ -144,6 +223,9 @@ defineExpose({
         <div class="compact-header-row">
           <span class="compact-title">Reference Image</span>
           <span v-if="fileSizeFormatted" class="compact-badge">{{ fileSizeFormatted }}</span>
+          <span v-if="qrCodes && qrCodes.length > 0" class="compact-qr-tag"
+            >{{ qrCodes.length }} QR</span
+          >
         </div>
         <span class="compact-filename" :title="fileName">{{ fileName }}</span>
       </div>
@@ -205,6 +287,86 @@ defineExpose({
         </div>
       </div>
 
+      <div v-if="qrCodes && qrCodes.length > 0" class="desktop-qr-section">
+        <div class="desktop-qr-header">
+          <svg
+            class="qr-icon-xs"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span>Detected QR Links ({{ qrCodes.length }})</span>
+        </div>
+        <div class="desktop-qr-list">
+          <div v-for="(code, idx) in qrCodes" :key="idx" class="desktop-qr-pill">
+            <a
+              v-if="isWebLink(code)"
+              :href="code"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="desktop-qr-link"
+              :title="`Open ${code}`"
+              @click.stop="handleOpenUrl($event, code)"
+            >
+              <span class="desktop-qr-text">{{ code }}</span>
+              <svg
+                class="qr-ext-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+            <span v-else class="desktop-qr-link is-text" :title="code">
+              <span class="desktop-qr-text">{{ code }}</span>
+            </span>
+            <button
+              type="button"
+              class="desktop-qr-copy-btn"
+              :class="{ 'is-copied': copiedQrIdx === idx }"
+              :title="copiedQrIdx === idx ? 'Copied!' : 'Copy link to clipboard'"
+              @click.stop="handleCopyUrl($event, code, idx)"
+            >
+              <svg
+                v-if="copiedQrIdx === idx"
+                class="qr-copy-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <svg
+                v-else
+                class="qr-copy-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span class="qr-copy-label">{{ copiedQrIdx === idx ? "Copied" : "Copy" }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
       <div class="desktop-footer">
         <span class="desktop-hint-text">
           Compare extracted dates, times, and venue details against the original flyer.
@@ -286,9 +448,9 @@ defineExpose({
               class="lightbox-close-btn"
               title="Close image view (Esc)"
               aria-label="Close image view"
-              @click="closeModal"
+              @click.stop="closeModal"
             >
-              <X class="tool-icon" :stroke-width="2.2" />
+              <X class="tool-icon" :stroke-width="2.4" />
             </button>
           </div>
 
@@ -300,10 +462,11 @@ defineExpose({
             @mousemove="onPan"
             @mouseup="endPan"
             @mouseleave="endPan"
-            @touchstart.passive="startPan"
-            @touchmove.passive="onPan"
-            @touchend="endPan"
+            @touchstart.passive="handleTouchStart"
+            @touchmove.passive="handleTouchMove"
+            @touchend="handleTouchEnd"
             @dblclick="toggleDoubleTapZoom"
+            @click="handleStageClick"
           >
             <div
               class="lightbox-img-transform-wrap"
@@ -317,9 +480,12 @@ defineExpose({
 
           <!-- Bottom Floating Instructions Bar -->
           <div class="lightbox-bottom-bar" @click.stop>
-            <span class="lightbox-instruction">
+            <span class="lightbox-instruction lightbox-instruction-desktop">
               <kbd class="key-cap">Double-click</kbd> to toggle zoom •
               <kbd class="key-cap">Drag</kbd> to pan • <kbd class="key-cap">Esc</kbd> to close
+            </span>
+            <span class="lightbox-instruction lightbox-instruction-mobile">
+              Tap background or swipe down to close
             </span>
           </div>
         </div>
@@ -644,6 +810,137 @@ defineExpose({
   text-align: center;
 }
 
+.compact-qr-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.desktop-qr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-surface-elevated, rgba(59, 130, 246, 0.05));
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.15));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.desktop-qr-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-icon-xs {
+  width: 12px;
+  height: 12px;
+}
+
+.desktop-qr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.desktop-qr-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.2));
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  overflow: hidden;
+}
+
+.desktop-qr-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  color: var(--accent-primary, #3b82f6);
+  text-decoration: none;
+  min-width: 0;
+  flex: 1;
+}
+
+.desktop-qr-link:hover {
+  background: rgba(59, 130, 246, 0.08);
+  text-decoration: underline;
+}
+
+.desktop-qr-link.is-text {
+  color: var(--text-primary, #111827);
+  cursor: text;
+}
+
+.desktop-qr-link.is-text:hover {
+  background: transparent;
+  text-decoration: none;
+}
+
+.desktop-qr-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.25rem 0.45rem;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.18));
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.desktop-qr-copy-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-primary, #3b82f6);
+}
+
+.desktop-qr-copy-btn.is-copied {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.desktop-qr-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.qr-copy-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.qr-copy-label {
+  line-height: 1;
+}
+
+.qr-ext-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 /* Responsive breakpoint for Mobile vs Desktop */
 @media (min-width: 900px) {
   .image-ref-compact {
@@ -675,11 +972,13 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 1.25rem;
+  padding: max(0.85rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) 0.85rem
+    max(1.25rem, env(safe-area-inset-left));
   background: rgba(22, 27, 38, 0.85);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
-  z-index: 10;
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 20;
   flex-shrink: 0;
 }
 
@@ -789,16 +1088,19 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  flex-shrink: 0;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
   color: #f3f4f6;
   cursor: pointer;
   transition: all 0.15s ease;
+  z-index: 30;
 }
-
 .lightbox-close-btn:hover {
   background: rgba(255, 59, 48, 0.25);
   border-color: rgba(255, 59, 48, 0.4);
@@ -850,10 +1152,18 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.65rem 1rem;
+  padding: 0.65rem 1rem max(0.65rem, env(safe-area-inset-bottom)) 1rem;
   background: rgba(15, 20, 30, 0.7);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
+}
+
+.lightbox-instruction-mobile {
+  display: none;
+}
+
+.lightbox-instruction-desktop {
+  display: inline;
 }
 
 .lightbox-instruction {
@@ -861,7 +1171,6 @@ defineExpose({
   color: #9ca3af;
   text-align: center;
 }
-
 .key-cap {
   display: inline-block;
   padding: 0.15rem 0.4rem;
@@ -895,22 +1204,76 @@ defineExpose({
 }
 
 /* Mobile toolbar adjustments */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .lightbox-toolbar {
-    padding: 0.65rem 0.85rem;
+    padding: max(0.65rem, env(safe-area-inset-top)) max(0.85rem, env(safe-area-inset-right)) 0.65rem
+      max(0.85rem, env(safe-area-inset-left));
     gap: 0.5rem;
   }
 
+  .lightbox-meta-badge {
+    display: none;
+  }
+
   .lightbox-filename {
-    max-width: 120px;
+    max-width: 110px;
+    font-size: 0.82rem;
   }
 
   .lightbox-sub {
     display: none;
   }
 
-  .lightbox-instruction {
-    font-size: 0.72rem;
+  .lightbox-zoom-controls {
+    gap: 0.2rem;
+    padding: 0.2rem 0.35rem;
+  }
+
+  .lightbox-tool-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .lightbox-tool-btn:last-child {
+    display: none;
+  }
+
+  .lightbox-close-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  /* Mobile image sizing & containment */
+  .lightbox-stage {
+    padding: 1rem 1.25rem;
+  }
+
+  .lightbox-img-transform-wrap {
+    max-width: min(88vw, 380px);
+    max-height: calc(72dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .lightbox-full-img {
+    max-width: min(88vw, 380px);
+    max-height: calc(72dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+  }
+
+  .lightbox-instruction-desktop {
+    display: none;
+  }
+
+  .lightbox-instruction-mobile {
+    display: inline;
+    font-size: 0.76rem;
+    color: #9ca3af;
   }
 }
 </style>

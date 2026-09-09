@@ -1,5 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
+  parseEventsFromText,
+  parseEventsProgressive,
   generateIcsCalendarContent,
   generateMultiIcsCalendarContent,
   formatDateForDisplay,
@@ -11,7 +13,9 @@ import {
   extractTimeInput,
   buildIsoFromDateTime,
   type EventDetails,
+  type EventFormData,
 } from "../src/services/event";
+import { isWebLink, extractUrlsFromText } from "../src/services/ocr";
 import parsedManifest from "../samples/parsed.json";
 
 export interface ParsedJsonEntry {
@@ -264,11 +268,36 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
       const ics = generateIcsCalendarContent(event);
       expect(ics).toStartWith("BEGIN:VCALENDAR");
       expect(ics).toEndWith("END:VCALENDAR");
-      expect(ics).toContain("SUMMARY:CAMPUS AS COMMONS: Agroforestry and Shared Stewardship at Tufts");
+      expect(ics).toContain(
+        "SUMMARY:CAMPUS AS COMMONS: Agroforestry and Shared Stewardship at Tufts",
+      );
       expect(ics).toContain("LOCATION:Curtis Hall Multipurpose Room");
       expect(ics).toContain("DTSTART:20260910T120000Z");
       expect(ics).toContain("DTEND:20260910T130000Z");
       expect(ics).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+    });
+
+    it("generates multi-event ICS correctly including URL fields for events with URLs", () => {
+      const event1: EventDetails = {
+        title: "Webinar Session 1",
+        start_time: "2026-09-10T12:00:00Z",
+        end_time: "2026-09-10T13:00:00Z",
+        is_all_day: false,
+        url: "https://zoom.us/j/session1",
+        confidence: 0.95,
+      };
+      const event2: EventDetails = {
+        title: "Session 2 (In Person)",
+        start_time: "2026-09-10T14:00:00Z",
+        end_time: "2026-09-10T15:00:00Z",
+        is_all_day: false,
+        location: "Hall A",
+        confidence: 0.95,
+      };
+      const ics = generateMultiIcsCalendarContent([event1, event2]);
+      expect(ics).toContain("URL:https://zoom.us/j/session1");
+      expect(ics).toContain("SUMMARY:Webinar Session 1");
+      expect(ics).toContain("SUMMARY:Session 2 (In Person)");
     });
   });
 
@@ -402,6 +431,184 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
       expect(icsOffset).toContain("DTSTART:20260907T150000");
       expect(icsOffset).toContain("DTEND:20260907T161500");
       expect(icsOffset).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959");
+    });
+
+    it("supports EventFormData and EventDetails models with first-class URL field", () => {
+      const formData: EventFormData = {
+        title: "Campus as Commons Agroforestry Lecture",
+        date: "2026-09-10",
+        startTime: "12:00",
+        endTime: "13:00",
+        isAllDay: false,
+        location: "Curtis Hall Multipurpose Room",
+        description: "Visiting Artist lecture and Q&A.",
+        url: "https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw",
+      };
+
+      expect(formData.url).toBe("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+
+      const details: EventDetails = {
+        title: formData.title,
+        start_time: "2026-09-10T12:00:00-04:00",
+        end_time: "2026-09-10T13:00:00-04:00",
+        is_all_day: false,
+        location: formData.location,
+        description: formData.description,
+        url: formData.url,
+        confidence: 0.95,
+        source: "ocr",
+      };
+
+      expect(details.url).toBe("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+      const ics = generateIcsCalendarContent(details);
+      expect(ics).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+    });
+
+    it("persists URL across single and batch calendar additions in ICS generation", () => {
+      const event1: EventDetails = {
+        title: "Webinar Lecture",
+        start_time: "2026-09-10T12:00:00-04:00",
+        end_time: "2026-09-10T13:00:00-04:00",
+        is_all_day: false,
+        location: "Curtis Hall",
+        description: "Keynote presentation",
+        url: "https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw",
+        confidence: 0.95,
+        source: "ocr",
+      };
+
+      const event2: EventDetails = {
+        title: "Evening Concert",
+        start_time: "2026-09-12T19:00:00-04:00",
+        end_time: "2026-09-12T22:00:00-04:00",
+        is_all_day: false,
+        location: "Main Stage",
+        description: "Live band performance",
+        url: "https://example.com/tickets",
+        confidence: 0.95,
+        source: "ocr",
+      };
+
+      const eventWithoutUrl: EventDetails = {
+        title: "Morning Walk",
+        start_time: "2026-09-13T09:00:00-04:00",
+        end_time: "2026-09-13T10:00:00-04:00",
+        is_all_day: false,
+        location: "Park Trail",
+        description: "Casual community walk",
+        url: null,
+        confidence: 0.90,
+        source: "ocr",
+      };
+
+      // Single event ICS
+      const singleIcs = generateIcsCalendarContent(event1);
+      expect(singleIcs).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+
+      // Batch / Multi-event ICS
+      const batchIcs = generateMultiIcsCalendarContent([event1, event2, eventWithoutUrl]);
+      expect(batchIcs).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+      expect(batchIcs).toContain("URL:https://example.com/tickets");
+
+      // Verify VEVENT separation and count
+      const veventCount = (batchIcs.match(/BEGIN:VEVENT/g) || []).length;
+      expect(veventCount).toBe(3);
+
+      const urlCount = (batchIcs.match(/URL:/g) || []).length;
+      expect(urlCount).toBe(2);
+    });
+
+    it("correctly identifies web URLs vs non-web QR payloads with isWebLink", () => {
+      expect(isWebLink("https://tufts.zoom.us/webinar/123")).toBe(true);
+      expect(isWebLink("http://example.com/tickets")).toBe(true);
+      expect(isWebLink("HTTPS://SUBDOMAIN.EXAMPLE.ORG/PATH?Q=1")).toBe(true);
+      expect(isWebLink("  https://whitespace.com/link  ")).toBe(true);
+
+      expect(isWebLink("WIFI:S:MyNetwork;T:WPA;P:secret;;")).toBe(false);
+      expect(isWebLink("BEGIN:VCARD\nVERSION:3.0\nFN:John Doe\nEND:VCARD")).toBe(false);
+      expect(isWebLink("mailto:contact@example.com")).toBe(false);
+      expect(isWebLink("tel:+16175551234")).toBe(false);
+      expect(isWebLink("Just some raw flyer text")).toBe(false);
+      expect(isWebLink("")).toBe(false);
+      expect(isWebLink(null)).toBe(false);
+      expect(isWebLink(undefined)).toBe(false);
+    });
+
+    it("supports simple and enhanced parsing modes for progressive retry flow", async () => {
+      const sampleText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+
+      // In browser/node test environment, verify parseEventsFromText returns events
+      const simpleEvents = await parseEventsFromText(sampleText, undefined, undefined, undefined, undefined, "simple");
+      expect(simpleEvents.length).toBeGreaterThan(0);
+      expect(simpleEvents[0].title).toBe("Weekly Pottery Class");
+
+      const enhancedEvents = await parseEventsFromText(sampleText, undefined, undefined, undefined, undefined, "enhanced");
+      expect(enhancedEvents.length).toBeGreaterThan(0);
+      expect(enhancedEvents[0].title).toBe("Weekly Pottery Class");
+    });
+
+    it("extracts and cleans URLs from pasted text with extractUrlsFromText", () => {
+      const textWithLinks = `
+        Tech Talk & Networking
+        Friday, Oct 24 at 5:00 PM
+        Location: Main Auditorium
+        RSVP here: https://meetup.example.com/events/123.
+        More info at http://events.example.org/details, or visit https://meetup.example.com/events/123
+        Contact us at contact@example.com or call tel:+1234567890
+      `;
+
+      const urls = extractUrlsFromText(textWithLinks);
+      expect(urls).toHaveLength(2);
+      expect(urls).toContain("https://meetup.example.com/events/123");
+      expect(urls).toContain("http://events.example.org/details");
+
+      // Edge cases
+      expect(extractUrlsFromText("")).toEqual([]);
+      expect(extractUrlsFromText(null)).toEqual([]);
+      expect(extractUrlsFromText(undefined)).toEqual([]);
+      expect(extractUrlsFromText("No links in this text at all")).toEqual([]);
+      expect(extractUrlsFromText("Visit (https://subdomain.example.com/path?a=1&b=2)")).toEqual([
+        "https://subdomain.example.com/path?a=1&b=2",
+      ]);
+    });
+
+    it("supports parseEventsProgressive with onSimpleResult callback and enhanced completion", async () => {
+      const pastedEventText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+
+      let simpleCallbackEvents: EventDetails[] | null = null;
+      const result = await parseEventsProgressive(pastedEventText, {
+        onSimpleResult: (events) => {
+          simpleCallbackEvents = events;
+        },
+      });
+
+      // Simple result callback was called immediately
+      expect(simpleCallbackEvents).not.toBeNull();
+      expect(simpleCallbackEvents!.length).toBeGreaterThan(0);
+      expect(simpleCallbackEvents![0].title).toBe("Weekly Pottery Class");
+
+      // Returned both simple and enhanced
+      expect(result.simple.length).toBeGreaterThan(0);
+      expect(result.simple[0].title).toBe("Weekly Pottery Class");
+      expect(result.enhanced).toBeDefined();
+      expect(result.enhanced!.length).toBeGreaterThan(0);
+      expect(result.enhanced![0].title).toBe("Weekly Pottery Class");
+    });
+
+    it("supports parseEventsProgressive with skipEnhanced: true", async () => {
+      const pastedEventText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+
+      let simpleCallbackEvents: EventDetails[] | null = null;
+      const result = await parseEventsProgressive(pastedEventText, {
+        skipEnhanced: true,
+        onSimpleResult: (events) => {
+          simpleCallbackEvents = events;
+        },
+      });
+
+      expect(simpleCallbackEvents).not.toBeNull();
+      expect(result.simple.length).toBeGreaterThan(0);
+      expect(result.enhanced).toBeUndefined();
     });
   });
 });

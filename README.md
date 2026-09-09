@@ -51,14 +51,32 @@ bun run tauri ios dev --host --open
 bun run tauri ios build --open
 ```
 
-### Standalone Run (No Mac dev server needed)
+### Standalone Install via Xcode (No Mac dev server needed)
 
-If you want the app installed on your iPhone running purely standalone (using the bundled static frontend):
+To install and run the standalone production app directly on a connected iPhone:
 
-1.  In Xcode, go to Product > Scheme > Edit Scheme... (Cmd + <).
-2.  Select Run on the left sidebar.
-3.  Change Build Configuration from Debug to Release.
-4.  Click Close and press Run (▶) to build and deploy to your iPhone.
+1. **Build and open in Xcode**:
+   ```sh
+   bun run tauri ios build --open
+   ```
+2. **Select your iPhone as the destination**:
+   - In Xcode’s top toolbar (next to the Play/Stop button), click the destination dropdown and choose your connected physical iPhone (instead of _Any iOS Device_ or a simulator).
+3. **Set scheme to Release**:
+   - Go to **Product > Scheme > Edit Scheme...** (`Cmd + <`).
+   - Select **Run** on the left sidebar -> **Info** tab.
+   - Set **Build Configuration** to **Release**.
+   - Click **Close**.
+4. **Check Signing**:
+   - Select the root `share2cal` project in Xcode's project navigator.
+   - Under **Targets**, verify the **Signing & Capabilities** tab for both `share2cal_iOS` and `ShareExtension` (ensure your Team is selected and automatic signing is valid).
+5. **Deploy**:
+   - Press **Run** (`Cmd + R` or ▶).
+   - Xcode will compile, sign, install, and launch the standalone app on your iPhone. Once installed, it runs completely independently of your Mac.
+
+> **First-time iPhone setup**:
+>
+> - **Developer Mode**: On iOS 16+, enable via **Settings > Privacy & Security > Developer Mode** (requires device restart).
+> - **Trust Developer**: If prompted with "Untrusted Developer", go to **Settings > General > VPN & Device Management**, tap your developer certificate, and tap **Trust**.
 
 ```sh
 # generate icons

@@ -19,6 +19,21 @@ export interface OcrResult {
   qr_codes?: string[];
 }
 
+export function isWebLink(s?: string | null): boolean {
+  if (!s) return false;
+  return /^https?:\/\//i.test(s.trim());
+}
+
+export function extractUrlsFromText(text?: string | null): string[] {
+  if (!text) return [];
+  const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
+  const matches = text.match(urlRegex) || [];
+  const cleaned = matches
+    .map((url) => url.replace(/[.,;:!?)]+$/, ""))
+    .filter((url) => isWebLink(url));
+  return Array.from(new Set(cleaned));
+}
+
 export async function extractTextFromImage(path: string): Promise<OcrResult> {
   try {
     return await invoke<OcrResult>("extract_text_from_image", { path });

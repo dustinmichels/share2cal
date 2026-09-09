@@ -24,6 +24,12 @@ pub struct OcrResult {
     pub qr_codes: Vec<String>,
 }
 
+/// Returns true if the string starts with http:// or https:// (case-insensitive)
+pub fn is_web_link(s: &str) -> bool {
+    let lower = s.trim().to_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
 /// Reconstructs line text by clustering 2D bounding boxes into horizontal rows.
 /// In Apple Vision / normalized image coordinates, y=0.0 is bottom and y=1.0 is top.
 pub fn reconstruct_spatial_lines(lines: &[OcrLine]) -> String {
@@ -523,5 +529,25 @@ mod tests {
         let invalid_bytes = b"not an image at all";
         let res = extract_text_from_bytes(invalid_bytes);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_ocr_result_serde_backward_compatibility() {
+        // 1. Deserializing legacy JSON without qr_codes field
+        let legacy_json = r#"{"text":"Some flyer text","lines":[]}"#;
+        let result: OcrResult = serde_json::from_str(legacy_json).expect("Legacy JSON should deserialize");
+        assert_eq!(result.text, "Some flyer text");
+        assert!(result.lines.is_empty());
+        assert!(result.qr_codes.is_empty(), "qr_codes should default to empty vec if omitted");
+
+        // 2. Deserializing modern JSON with qr_codes
+        let modern_json = r#"{"text":"Flyer with QR","lines":[],"qr_codes":["https://example.com/rsvp"]}"#;
+        let modern_result: OcrResult = serde_json::from_str(modern_json).expect("Modern JSON should deserialize");
+        assert_eq!(modern_result.qr_codes, vec!["https://example.com/rsvp".to_string()]);
+
+        // 3. Serialization round-trip
+        let serialized = serde_json::to_string(&modern_result).expect("Serialization should succeed");
+        let roundtrip: OcrResult = serde_json::from_str(&serialized).expect("Roundtrip should succeed");
+        assert_eq!(modern_result, roundtrip);
     }
 }

@@ -353,8 +353,16 @@ export function generateGoogleCalendarUrl(event: EventDetails): string {
   params.set("text", event.title || "Untitled Event");
   params.set("dates", `${start}/${end}`);
 
-  if (event.description && event.description.trim()) {
-    params.set("details", event.description.trim());
+  let details = event.description && event.description.trim() ? event.description.trim() : "";
+  if (event.url && event.url.trim()) {
+    const trimmedUrl = event.url.trim();
+    if (!details.includes(trimmedUrl)) {
+      details = details ? `${details}\n\n${trimmedUrl}` : trimmedUrl;
+    }
+  }
+
+  if (details) {
+    params.set("details", details);
   }
 
   if (event.location && event.location.trim()) {

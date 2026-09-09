@@ -1,14 +1,48 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { Sparkles, LoaderCircle } from "lucide-vue-next";
-
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { isWebLink } from "../services/ocr";
 defineProps<{
   file: File;
   previewUrl: string | null;
   isProcessing?: boolean;
   isFromShareExtension?: boolean;
   hasEvent?: boolean;
+  qrCodes?: string[];
 }>();
 
+async function handleOpenUrl(e: MouseEvent, url: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await openUrl(url);
+  } catch {
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
+  }
+}
+
+const copiedQrIdx = ref<number | null>(null);
+let copiedQrTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function handleCopyUrl(e: MouseEvent, url: string, index: number) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    }
+    copiedQrIdx.value = index;
+    if (copiedQrTimer) clearTimeout(copiedQrTimer);
+    copiedQrTimer = setTimeout(() => {
+      copiedQrIdx.value = null;
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy QR code URL to clipboard:", err);
+  }
+}
 const emit = defineEmits<{
   (e: "scan"): void;
   (e: "remove"): void;
@@ -76,6 +110,92 @@ function formatFileSize(bytes: number): string {
       <img v-if="previewUrl" :src="previewUrl" alt="Selected flyer preview" class="stage-img" />
     </div>
 
+    <!-- Detected QR Links -->
+    <div v-if="qrCodes && qrCodes.length > 0" class="qr-preview-chips-row">
+      <div class="qr-preview-label">
+        <svg
+          class="qr-preview-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg>
+        <span>Detected Link{{ qrCodes.length > 1 ? "s" : "" }}:</span>
+      </div>
+      <div class="qr-chips-wrap">
+        <div v-for="(code, idx) in qrCodes" :key="idx" class="qr-link-pill">
+          <a
+            v-if="isWebLink(code)"
+            :href="code"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="qr-link-pill-link"
+            :title="`Open ${code}`"
+            @click.stop="handleOpenUrl($event, code)"
+          >
+            <span class="qr-link-pill-text">{{ code }}</span>
+            <svg
+              class="qr-link-ext-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+          <span v-else class="qr-link-pill-link is-text" :title="code">
+            <span class="qr-link-pill-text">{{ code }}</span>
+          </span>
+          <button
+            type="button"
+            class="qr-link-copy-btn"
+            :class="{ 'is-copied': copiedQrIdx === idx }"
+            :title="copiedQrIdx === idx ? 'Copied!' : 'Copy link to clipboard'"
+            @click.stop="handleCopyUrl($event, code, idx)"
+          >
+            <svg
+              v-if="copiedQrIdx === idx"
+              class="qr-copy-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <svg
+              v-else
+              class="qr-copy-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span class="qr-copy-label">{{ copiedQrIdx === idx ? "Copied" : "Copy" }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="scanner-action-wrap">
       <button
         type="button"
@@ -117,6 +237,129 @@ function formatFileSize(bytes: number): string {
 </template>
 
 <style scoped>
+.qr-preview-chips-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-surface-elevated, rgba(59, 130, 246, 0.05));
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.15));
+  border-radius: var(--radius-sm, 8px);
+  margin: 0.6rem 0;
+}
+
+.qr-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-preview-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.qr-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.qr-link-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.25));
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent-primary, #3b82f6);
+  transition: all 0.15s ease;
+  overflow: hidden;
+}
+
+.qr-link-pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.45rem 0.2rem 0.55rem;
+  color: var(--accent-primary, #3b82f6);
+  text-decoration: none;
+  min-width: 0;
+  transition: background 0.15s ease;
+}
+
+.qr-link-pill-link:hover {
+  background: rgba(59, 130, 246, 0.08);
+  text-decoration: underline;
+}
+
+.qr-link-pill-link.is-text {
+  color: var(--text-primary, #111827);
+  cursor: text;
+}
+
+.qr-link-pill-link.is-text:hover {
+  background: transparent;
+  text-decoration: none;
+}
+
+.qr-link-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.2));
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.qr-link-copy-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-link-copy-btn.is-copied {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.qr-copy-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.qr-copy-label {
+  line-height: 1;
+}
+
+.qr-link-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.qr-link-ext-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 .preview-top-bar {
   display: flex;
   justify-content: space-between;

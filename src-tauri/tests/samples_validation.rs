@@ -920,9 +920,10 @@ async fn test_extract_event_from_commons_sample_image() {
         "QR code in commons.jpg must decode to Tufts Zoom webinar URL"
     );
 
-    let mut event = parse_event_internal(
+    let prompt_text = format!("{}\n\nLinks / QR Codes:\n{}", ocr_res.text, ocr_res.qr_codes.join("\n"));
+    let event = parse_event_internal(
         None,
-        &ocr_res.text,
+        &prompt_text,
         Some("2026-09-06T12:00:00-04:00".to_string()),
         Some(-240),
         None,
@@ -930,10 +931,6 @@ async fn test_extract_event_from_commons_sample_image() {
         Some("simple"),
     )
     .await;
-
-    if event.url.is_none() && !ocr_res.qr_codes.is_empty() {
-        event.url = Some(ocr_res.qr_codes[0].clone());
-    }
 
     assert!(
         event.title.to_uppercase().contains("COMMONS") || event.title.to_uppercase().contains("AGROFORESTRY"),

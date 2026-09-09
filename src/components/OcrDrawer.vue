@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import type { OcrResult } from "../services/ocr";
-
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { isWebLink, type OcrResult } from "../services/ocr";
 const props = defineProps<{
   ocrResult: OcrResult;
 }>();
@@ -13,6 +13,33 @@ const emit = defineEmits<{
 const showOcrSection = ref(false);
 const showLineDetails = ref(false);
 const copiedOcr = ref(false);
+const copiedQrIdx = ref<number | null>(null);
+
+async function handleOpenUrl(e: MouseEvent, url: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await openUrl(url);
+  } catch {
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
+  }
+}
+
+async function copyQrToClipboard(url: string, idx: number) {
+  try {
+    await navigator.clipboard.writeText(url);
+    copiedQrIdx.value = idx;
+    setTimeout(() => {
+      if (copiedQrIdx.value === idx) {
+        copiedQrIdx.value = null;
+      }
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy QR link:", err);
+  }
+}
 
 const wordCount = computed(() => {
   if (!props.ocrResult?.text) return 0;
@@ -58,8 +85,12 @@ async function copyOcrToClipboard() {
         </svg>
         <span class="accordion-title">Extracted OCR Text</span>
         <span class="chip-count"
-          >{{ ocrResult.lines.length }} lines • {{ wordCount }} words • {{ averageConfidence }}%
-          conf</span
+          >{{ ocrResult.lines.length }} lines • {{ wordCount }} words<template
+            v-if="ocrResult.qr_codes && ocrResult.qr_codes.length > 0"
+          >
+            • {{ ocrResult.qr_codes.length }} QR</template
+          >
+          • {{ averageConfidence }}% conf</span
         >
       </div>
 
@@ -134,6 +165,102 @@ async function copyOcrToClipboard() {
         </button>
       </div>
 
+      <!-- Detected QR Codes Section -->
+      <div v-if="ocrResult.qr_codes && ocrResult.qr_codes.length > 0" class="qr-codes-container">
+        <div class="qr-section-header">
+          <svg
+            class="qr-header-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span class="qr-section-title"
+            >Detected QR Codes & Links ({{ ocrResult.qr_codes.length }})</span
+          >
+        </div>
+
+        <div class="qr-chips-list">
+          <div v-for="(code, idx) in ocrResult.qr_codes" :key="idx" class="qr-chip-card">
+            <div class="qr-chip-info">
+              <svg
+                class="qr-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+              </svg>
+              <a
+                v-if="isWebLink(code)"
+                :href="code"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="qr-url-link"
+                :title="code"
+                @click="handleOpenUrl($event, code)"
+              >
+                {{ code }}
+              </a>
+              <span v-else class="qr-url-link is-text" :title="code">
+                {{ code }}
+              </span>
+            </div>
+
+            <div class="qr-chip-actions">
+              <button
+                type="button"
+                class="btn-chip-action"
+                :class="{ 'is-copied': copiedQrIdx === idx }"
+                :title="copiedQrIdx === idx ? 'Copied!' : 'Copy link to clipboard'"
+                @click="copyQrToClipboard(code, idx)"
+              >
+                <template v-if="copiedQrIdx === idx">
+                  <svg
+                    class="action-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Copied</span>
+                </template>
+                <template v-else>
+                  <svg
+                    class="action-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy</span>
+                </template>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <textarea
         readonly
         class="ocr-raw-display"
@@ -180,6 +307,124 @@ async function copyOcrToClipboard() {
 </template>
 
 <style scoped>
+.qr-codes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-surface-elevated, rgba(59, 130, 246, 0.05));
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.15));
+}
+
+.qr-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.qr-header-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-chips-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.qr-chip-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-input, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border-card-subtle, rgba(0, 0, 0, 0.08));
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.qr-chip-info {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.qr-link-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.qr-url-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent-primary, #3b82f6);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.qr-url-link:hover {
+  text-decoration: underline;
+}
+
+.qr-url-link.is-text {
+  color: var(--text-primary, #111827);
+  cursor: text;
+}
+
+.qr-url-link.is-text:hover {
+  text-decoration: none;
+}
+
+.qr-chip-actions {
+  flex-shrink: 0;
+}
+
+.btn-chip-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-card-subtle, rgba(0, 0, 0, 0.12));
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary, #4b5563);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-chip-action:hover {
+  background: var(--bg-surface-elevated, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.btn-chip-action.is-copied {
+  color: var(--accent-success, #10b981);
+  border-color: var(--accent-success, #10b981);
+}
+
+.action-icon {
+  width: 11px;
+  height: 11px;
+}
 .ocr-accordion {
   padding: 0.9rem 1.1rem;
   gap: 0.75rem;

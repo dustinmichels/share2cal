@@ -183,3 +183,47 @@ fn test_calendar_info_serde_roundtrip() {
     let deserialized: CalendarInfo = serde_json::from_str(&serialized).expect("deserialize");
     assert_eq!(info, deserialized);
 }
+
+#[test]
+fn test_create_calendar_events_batch_preserves_urls() {
+    let _guard = TEST_CALENDAR_MUTEX.lock();
+    clear_mock_created_events();
+    let event1 = EventDetails {
+        title: "Webinar Event 1".to_string(),
+        start_time: Some("2026-09-10T12:00:00Z".to_string()),
+        end_time: Some("2026-09-10T13:00:00Z".to_string()),
+        is_all_day: false,
+        location: Some("Online".to_string()),
+        description: Some("Webinar with link".to_string()),
+        recurrence_rule: None,
+        url: Some("https://tufts.zoom.us/webinar/1".to_string()),
+        confidence: 0.95,
+        source: "test".to_string(),
+    };
+    let event2 = EventDetails {
+        title: "In-Person Event 2".to_string(),
+        start_time: Some("2026-09-10T14:00:00Z".to_string()),
+        end_time: Some("2026-09-10T15:00:00Z".to_string()),
+        is_all_day: false,
+        location: Some("Hall B".to_string()),
+        description: Some("No URL here".to_string()),
+        recurrence_rule: None,
+        url: None,
+        confidence: 0.95,
+        source: "test".to_string(),
+    };
+
+    let result = create_calendar_events(vec![event1, event2], None, None, None);
+    assert!(result.is_ok(), "Batch calendar event creation should succeed");
+    let ids = result.unwrap();
+    assert_eq!(ids.len(), 2);
+
+    let recorded = get_mock_created_events();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(
+        recorded[0].event.url.as_deref(),
+        Some("https://tufts.zoom.us/webinar/1")
+    );
+    assert_eq!(recorded[1].event.url, None);
+    clear_mock_created_events();
+}

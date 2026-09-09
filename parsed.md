@@ -70,6 +70,7 @@
 - **Details:** Mary Mattingly, Visiting Artist, Center for the Humanities at Tufts. Remote viewers: go.tufts.edu/HOCU0910
 - **URL:** https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw
 - **Repeating:** false
+
 ---
 
 ## samples/gilman_flyer.png

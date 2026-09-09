@@ -219,9 +219,6 @@ function handleProgress(payload: DownloadProgressPayload) {
   } else if (payload.status === "error") {
     delete activeDownloads.value[payload.model_id];
     actionError.value = payload.error || "An error occurred during download.";
-    if ((payload.error || "").toLowerCase().includes("insufficient disk space")) {
-      emit("update:parsingMode", "simple");
-    }
     loadData();
   }
 }
@@ -250,9 +247,6 @@ async function handleDownload(modelId: string) {
     if (model) model.is_downloading = false;
     const errMsg = err instanceof Error ? err.message : String(err);
     actionError.value = `Download failed: ${errMsg}`;
-    if (errMsg.toLowerCase().includes("insufficient disk space")) {
-      emit("update:parsingMode", "simple");
-    }
   }
 }
 
@@ -341,11 +335,8 @@ function setMode(mode: ParsingMode) {
     const reqBytes = Math.round(defaultModel.value.size_bytes * 1.5);
     const free = storageInfo.value?.free_disk_space_bytes;
     if (typeof free === "number" && free < reqBytes) {
-      actionError.value = `Insufficient disk space to download default AI model (${formatBytes(free)} free, ${formatBytes(reqBytes)} required). Remaining in Simple Mode.`;
-      emit("update:parsingMode", "simple");
-      return;
-    }
-    if (!defaultModel.value.is_downloading && !defaultModel.value.is_downloaded) {
+      actionError.value = `Insufficient disk space to download default AI model (${formatBytes(free)} free, ${formatBytes(reqBytes)} required). Scans will fall back to Simple Mode until space is freed.`;
+    } else if (!defaultModel.value.is_downloading && !defaultModel.value.is_downloaded) {
       handleDownload(defaultModel.value.id);
     }
   }

@@ -119,31 +119,34 @@ Checklist and architectural specifications for adding native **Android** and **W
   - Architect concurrent pipeline: dispatch `textRecognizer.process(image)` and `barcodeScanner.process(image)` via `Tasks.whenAllSuccess` on Android.
 - [x] **Windows / Cross-Platform Fallback (`ocr_windows.rs` / pure Rust)**:
   - Evaluated: `Windows.Media.Ocr` only handles text from `SoftwareBitmap` (WinRT `BarcodeScanner` requires physical POS hardware). `zxing-cpp` introduces CMake/C++ toolchain friction on MSVC. Evaluated `rxing` (pure Rust ZXing port) as the recommended zero-C++ fallback for cross-platform/Windows barcode decoding when platform-native APIs lack barcode extraction.
+
 ### 4.2 Data Model & First-Class URL Field
 
-- [ ] **OCR Data Model (`src-tauri/src/ocr.rs` & `src/services/ocr.ts`)**:
+- [x] **OCR Data Model (`src-tauri/src/ocr.rs` & `src/services/ocr.ts`)**:
   - Add `qr_codes: Vec<String>` with `#[serde(default)]` to `OcrResult` (ensures backward compatibility if omitted by any backend).
   - Mirror `qr_codes?: string[]` on TypeScript interface `OcrResult`.
-- [ ] **Event Model Structs (`src-tauri/src/parser.rs` & `src/services/event.ts`)**:
+- [x] **Event Model Structs (`src-tauri/src/parser/` & `src/services/event.ts`)**:
   - Add `pub url: Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]` to `EventDetails` struct in Rust.
-  - Update LLM JSON schema and GBNF grammar in `parser.rs` to include `"url": {"type": ["string", "null"]}`.
+  - Update LLM JSON schema and GBNF grammar in `parser/schema.rs` to include `"url": {"type": ["string", "null"]}`.
   - Add `url?: string | null` to `EventDetails` and `url: string` to `EventFormData` in TypeScript.
-- [ ] **Calendar Creation Objects (`src-tauri/src/calendar.rs` & `src/services/calendar.ts`)**:
-  - Add `url: Option<String>` to `CreateEventParams` struct in Rust and TypeScript interface.
+- [x] **Calendar Creation Objects (`src-tauri/src/calendar.rs` & `src/services/calendar.ts`)**:
+  - Pass `event.url` through `EventDetails` to `calendar::create_event` and `create_events` across Tauri command bridge.
   - Wire `url` to native Apple EventKit (`calendar_apple.m`: `event.URL = [NSURL URLWithString:...]`).
-  - Wire `url` to Windows Appointment (`calendar_windows.rs`: `appointment.SetUri(...)`) and Android calendar provider.
-  - Include `URL:<url>` in generated `.ics` calendar files (`calendar.rs` and `services/calendar.ts`).
-- [ ] **Frontend Ingestion & UI (`src/App.vue`, `EventFormCard.vue`, `EventPreviewCard.vue`)**:
-  - Update empty OCR extraction guard in `App.vue` (`!res.text.trim()`) to `!res.text.trim() && (!res.qr_codes || res.qr_codes.length === 0)` so QR-dominant flyers with minimal OCR text are processed.
-  - Add editable "URL / Meeting Link" input field to `EventFormCard.vue` and link badge/preview to `EventPreviewCard.vue`.
-  - Display detected QR links as interactive chips or clickable previews in `ImagePreviewCard.vue` / `OcrDrawer.vue`.
+  - Include `URL:<url>` in generated `.ics` calendar files (`generateIcsCalendarContent` and `generateMultiIcsCalendarContent` in `src/services/event.ts`).
+  - Include `url` in Google Calendar web template generation (`generateGoogleCalendarUrl`).
+  - _Deferred (Windows / Android)_: Wire `url` to Windows Appointment (`appointment.SetUri(...)`) and Android calendar provider when native calendar backends are implemented in Sections 1 & 2.
+- [x] **Frontend Ingestion & UI (`src/App.vue`, `EventFormCard.vue`, `EventPreviewCard.vue`, `OcrDrawer.vue`, `ImagePreviewCard.vue`, `ImageReferenceCard.vue`)**:
+  - Update empty OCR extraction guard in `App.vue` (`!res.text.trim() && (!res.qr_codes || res.qr_codes.length === 0)`) and construct fallback parsing text when only QR links are present.
+  - Propagate decoded QR codes to event `url` when parsing from image/text in `App.vue` (`handleGo` and `handleReparse`).
+  - Add editable "URL / Meeting Link" input field to `EventFormCard.vue` and interactive clickable link badge to `EventPreviewCard.vue`.
+  - Display detected QR links as interactive chips with copy and open actions in `OcrDrawer.vue`, `ImagePreviewCard.vue`, and `ImageReferenceCard.vue`.
 
 ### 4.3 Parser & LLM Orchestration
 
-- [ ] **Parser & LLM Context (`src-tauri/src/lib.rs` & `src-tauri/src/parser.rs`)**:
+- [x] **Parser & LLM Context (`src-tauri/src/lib.rs` & `src-tauri/src/parser.rs`)**:
   - Append detected QR links/URLs to the text prompt supplied to the LLM (e.g., `Links / QR Codes: <url>`) so the model incorporates meeting/RSVP links into the event `url`, `description`, or `location`.
   - Update deterministic parser (`parse_event_deterministic`) to populate `EventDetails.url` with the first detected QR code or web link when available.
-- [ ] **Calendar Export Verification**:
+- [x] **Calendar Export Verification**:
   - Verify that single and batch calendar additions persist the `url` property across both native calendar store and `.ics` download flows.
 
 ### 4.4 Fixtures & Verification

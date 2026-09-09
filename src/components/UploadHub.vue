@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { Sparkles } from "lucide-vue-next";
+import { Sparkles, ClipboardPaste, X } from "lucide-vue-next";
 
 const props = defineProps<{
   isDragging?: boolean;
@@ -10,10 +10,37 @@ const emit = defineEmits<{
   (e: "selectFile", file: File): void;
   (e: "chooseFile"): void;
   (e: "takePhoto"): void;
+  (e: "pasteText", text: string): void;
 }>();
 
 const localDragging = ref(false);
 const activeDragging = computed(() => props.isDragging || localDragging.value);
+
+const showTextModal = ref(false);
+const manualText = ref("");
+
+async function handlePasteTextClick() {
+  try {
+    if (navigator?.clipboard?.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        emit("pasteText", text.trim());
+        return;
+      }
+    }
+  } catch {
+    // Clipboard read access denied or unavailable; fall through to modal
+  }
+  showTextModal.value = true;
+}
+
+function submitManualText() {
+  const trimmed = manualText.value.trim();
+  if (!trimmed) return;
+  emit("pasteText", trimmed);
+  manualText.value = "";
+  showTextModal.value = false;
+}
 
 function handleDragOver(event: DragEvent) {
   event.preventDefault();
@@ -25,12 +52,30 @@ function handleDragLeave(event: DragEvent) {
   localDragging.value = false;
 }
 
-function handleDrop(event: DragEvent) {
+async function handleDrop(event: DragEvent) {
   event.preventDefault();
   localDragging.value = false;
 
   if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
-    emit("selectFile", event.dataTransfer.files[0]);
+    const file = event.dataTransfer.files[0];
+    if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+      try {
+        const text = await file.text();
+        if (text && text.trim()) {
+          emit("pasteText", text.trim());
+          return;
+        }
+      } catch {
+        // Fallback to selectFile
+      }
+    }
+    emit("selectFile", file);
+    return;
+  }
+
+  const text = event.dataTransfer?.getData("text");
+  if (text && text.trim()) {
+    emit("pasteText", text.trim());
   }
 }
 </script>
@@ -59,9 +104,9 @@ function handleDrop(event: DragEvent) {
           <polyline points="21 15 16 10 5 21"></polyline>
         </svg>
       </div>
-      <h2 class="upload-title">Add Flyer or Screenshot</h2>
+      <h2 class="upload-title">Add Flyer, Screenshot or Text</h2>
       <p class="upload-subtitle">
-        Drag and drop a flyer or screenshot here, or choose a file to begin.
+        Drag & drop a flyer, choose a file, or paste event text to begin.
       </p>
     </div>
 
@@ -100,8 +145,11 @@ function handleDrop(event: DragEvent) {
         </svg>
         <span>Take Photo</span>
       </button>
+      <button type="button" class="btn-touch btn-touch-secondary btn-paste-text" @click="handlePasteTextClick">
+        <ClipboardPaste class="btn-icon" :stroke-width="2.2" />
+        <span>Paste Text</span>
+      </button>
     </div>
-
     <div class="upload-parse-wrap">
       <button
         type="button"
@@ -116,9 +164,71 @@ function handleDrop(event: DragEvent) {
       <p class="parse-hint">Upload a picture to activate parse</p>
     </div>
     <div class="upload-footer">
-      <p class="format-note">Supports PNG, JPG, HEIF, WebP • Drag & drop or paste via ⌘V</p>
+      <p class="format-note">Supports PNG, JPG, HEIF, WebP, or paste text • Drag & drop or paste via ⌘V</p>
     </div>
   </section>
+
+    <!-- Modal Dialog for Pasting / Typing Text -->
+    <Teleport to="body">
+      <div
+        v-if="showTextModal"
+        class="paste-text-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Paste Event Text"
+        @keydown.esc="showTextModal = false"
+      >
+        <div class="paste-text-backdrop" @click="showTextModal = false"></div>
+        <div class="paste-text-dialog">
+          <div class="paste-text-header">
+            <div class="paste-text-header-title">
+              <ClipboardPaste class="dialog-icon" :stroke-width="2.2" />
+              <div>
+                <h3 class="dialog-title">Paste Event Text</h3>
+                <span class="dialog-subtitle">Paste any invitation, email, flyer details, or notes</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="dialog-close-btn"
+              aria-label="Close"
+              @click="showTextModal = false"
+            >
+              <X class="btn-icon-sm" :stroke-width="2.2" />
+            </button>
+          </div>
+          <div class="paste-text-body">
+            <textarea
+              v-model="manualText"
+              class="paste-textarea"
+              placeholder="Paste or type event text here...&#10;e.g. Pottery Class&#10;Tuesdays & Thursdays 6:00 PM - 8:00 PM&#10;Community Arts Center&#10;https://arts.example.org"
+              rows="6"
+              autofocus
+              @keydown.meta.enter="submitManualText"
+              @keydown.ctrl.enter="submitManualText"
+            ></textarea>
+          </div>
+          <div class="paste-text-footer">
+            <button
+              type="button"
+              class="btn-touch btn-touch-secondary btn-cancel"
+              @click="showTextModal = false"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn-touch btn-touch-primary btn-submit"
+              :disabled="!manualText.trim()"
+              @click="submitManualText"
+            >
+              <Sparkles class="btn-icon" :stroke-width="2.2" />
+              <span>Parse Event</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 </template>
 
 <style scoped>
@@ -231,5 +341,132 @@ function handleDrop(event: DragEvent) {
   font-size: 0.8rem;
   color: var(--text-tertiary);
   margin: 0;
+}
+
+/* Paste Text Dialog */
+.paste-text-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.paste-text-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.paste-text-dialog {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-card);
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.paste-text-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.25rem 0.75rem 1.25rem;
+}
+
+.paste-text-header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.dialog-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dialog-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+}
+
+.dialog-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dialog-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.paste-text-body {
+  padding: 0.75rem 1.25rem;
+}
+
+.paste-textarea {
+  width: 100%;
+  background: var(--bg-main, #0f141c);
+  border: 1.5px solid var(--border-input);
+  border-radius: 10px;
+  padding: 0.85rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  resize: vertical;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.paste-textarea:focus {
+  border-color: var(--accent-primary);
+}
+
+.paste-text-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem 1.25rem 1.25rem;
+}
+
+.btn-cancel {
+  width: auto;
+  min-height: 42px;
+  padding: 0.5rem 1rem;
+  font-size: 0.88rem;
+}
+
+.btn-submit {
+  width: auto;
+  min-height: 42px;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.9rem;
 }
 </style>

@@ -37,6 +37,23 @@ pub fn is_noise_or_metadata_line(s: &str) -> bool {
     false
 }
 
+pub fn is_url_or_link_line(s: &str) -> bool {
+    let lower = s.trim().to_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("www.")
+        || lower.starts_with("links / qr codes:")
+        || lower.starts_with("qr code:")
+        || lower.starts_with("qr codes:")
+        || lower.starts_with("qr:")
+        || lower.starts_with("url:")
+        || lower.starts_with("link:")
+        || lower.starts_with("links:")
+        || lower.starts_with("website:")
+        || lower.starts_with("zoom:")
+        || lower.starts_with("rsvp:")
+}
+
 pub fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
     // 1. Explicit marker: "This year at ...", "Location: ...", "Venue: ...", "Where: ..."
     for (i, line) in lines.iter().enumerate() {
@@ -79,7 +96,8 @@ pub fn extract_location(lines: &[&str], _full_text: &str) -> Option<String> {
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || upper.contains("FOR ADA") || upper.contains("ACCOMMODATIONS") || upper.contains("311")
             || upper.contains("RAIN DATE") || upper.contains("ART BY:") || upper.len() < 3
-            || is_date_or_time_line(&upper) || is_noise_or_metadata_line(trimmed) {
+            || is_date_or_time_line(&upper) || is_noise_or_metadata_line(trimmed)
+            || is_url_or_link_line(trimmed) {
             continue;
         }
 
@@ -204,6 +222,7 @@ pub fn extract_title(lines: &[&str], _full_text: &str) -> String {
         if trimmed.starts_with('*') || trimmed.starts_with('-') || trimmed.starts_with('•')
             || is_noise_or_metadata_line(trimmed)
             || is_date_or_time_line(trimmed)
+            || is_url_or_link_line(trimmed)
             || supporting_indices.contains(&idx) {
             continue;
         }
@@ -282,7 +301,7 @@ pub fn extract_title(lines: &[&str], _full_text: &str) -> String {
     // Fallback: first non-trivial line
     for &line in lines.iter().take(4) {
         let t = line.trim();
-        if t.len() > 3 && !t.contains(':') && !t.starts_with('*') && !is_noise_or_metadata_line(t) && !is_date_or_time_line(t) {
+        if t.len() > 3 && !t.contains(':') && !t.starts_with('*') && !is_noise_or_metadata_line(t) && !is_date_or_time_line(t) && !is_url_or_link_line(t) {
             return t.to_string();
         }
     }
@@ -319,7 +338,7 @@ pub fn extract_description(lines: &[&str], title: &str, location: Option<&str>) 
         if title_upper.contains(&upper) || (!loc_upper.is_empty() && loc_upper.contains(&upper)) {
             continue;
         }
-        if is_noise_or_metadata_line(trimmed) || (!NOTE_PREFIX_RE.is_match(trimmed) && is_date_or_time_line(trimmed)) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 3 {
+        if is_noise_or_metadata_line(trimmed) || (!NOTE_PREFIX_RE.is_match(trimmed) && is_date_or_time_line(trimmed)) || is_url_or_link_line(trimmed) || (trimmed.ends_with(':') && trimmed.len() <= 5) || trimmed.len() < 3 {
             continue;
         }
 

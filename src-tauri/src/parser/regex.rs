@@ -122,3 +122,11 @@ pub(crate) static SLOGAN_RE: LazyLock<Regex> =
 pub(crate) static TOUR_SUBTITLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:tour|summit|conference|symposium|workshop|webinar|expo|exhibition|series|session|festival)\b").unwrap()
 });
+
+pub(crate) static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\bhttps?://[^\s<>"{}|\\^`\[\]]+"#).unwrap()
+});
+
+pub(crate) static WWW_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\bwww\.[a-z0-9\-]+(\.[a-z0-9\-]+)+[^\s<>"{}|\\^`\[\]]*"#).unwrap()
+});

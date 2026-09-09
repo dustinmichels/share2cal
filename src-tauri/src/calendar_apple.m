@@ -31,12 +31,15 @@ int calendar_apple_check_permission(char **out_status, char **out_error) {
                 statusStr = @"denied";
                 break;
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000 || __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
             case EKAuthorizationStatusFullAccess:
                 statusStr = @"authorized";
                 break;
             case EKAuthorizationStatusWriteOnly:
                 statusStr = @"write_only";
                 break;
+#pragma clang diagnostic pop
 #else
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -108,14 +111,19 @@ int calendar_apple_list_calendars(char **out_json, char **out_error) {
     @autoreleasepool {
         EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
         // If not fully authorized, do NOT prompt automatically on listing; return empty array cleanly
+        BOOL isAuthorized = NO;
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000 || __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
-        if (status != EKAuthorizationStatusFullAccess) {
-#else
+        if (@available(iOS 17.0, macOS 14.0, *)) {
+            isAuthorized = (status == EKAuthorizationStatusFullAccess);
+        } else
+#endif
+        {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        if (status != EKAuthorizationStatusAuthorized) {
+            isAuthorized = (status == EKAuthorizationStatusAuthorized);
 #pragma clang diagnostic pop
-#endif
+        }
+        if (!isAuthorized) {
             if (out_json) {
                 *out_json = create_c_string(@"[]");
             }

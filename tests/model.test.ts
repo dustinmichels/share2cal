@@ -3,12 +3,20 @@ import {
   formatBytes,
   formatSpeed,
   isDesktopDevice,
+  isMobileDevice,
   checkDiskSpaceAndAutoDownloadDefaultModel,
 } from "../src/services/model";
-import { setStoredParsingMode, getStoredParsingMode } from "../src/services/settings";
+import {
+  setStoredParsingMode,
+  getStoredParsingMode,
+  clearStoredSettings,
+} from "../src/services/settings";
 import manifest from "../model-manifest.json";
 
 describe("Model Service & Manifest", () => {
+  beforeEach(() => {
+    clearStoredSettings();
+  });
   it("has a valid model-manifest.json with SmolLM2-360M as default", () => {
     expect(manifest.default_model_id).toBe("smollm2-360m-instruct-q4_k_m");
     expect(manifest.models.length).toBeGreaterThan(0);
@@ -50,6 +58,51 @@ describe("Model Service & Manifest", () => {
 
   it("correctly identifies desktop vs mobile environments", () => {
     expect(typeof isDesktopDevice()).toBe("boolean");
+    expect(typeof isMobileDevice()).toBe("boolean");
+    expect(isMobileDevice()).toBe(!isDesktopDevice());
+
+    const originalUserAgent = navigator.userAgent;
+    try {
+      // Test mobile user agents
+      Object.defineProperty(navigator, "userAgent", {
+        value: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+        configurable: true,
+      });
+      expect(isMobileDevice()).toBe(true);
+      expect(isDesktopDevice()).toBe(false);
+
+      Object.defineProperty(navigator, "userAgent", {
+        value: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36",
+        configurable: true,
+      });
+      expect(isMobileDevice()).toBe(true);
+      expect(isDesktopDevice()).toBe(false);
+
+      // Test desktop user agent
+      Object.defineProperty(navigator, "userAgent", {
+        value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        configurable: true,
+      });
+      expect(isMobileDevice()).toBe(false);
+      expect(isDesktopDevice()).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        value: originalUserAgent,
+        configurable: true,
+      });
+    }
+  });
+
+  it("ensures default mode is enhanced and auto-download targets default model", async () => {
+    // 2. Default mode is enhanced when not set
+    expect(getStoredParsingMode()).toBe("enhanced");
+
+    // 1. Install default tiny LLM right away (auto-download)
+    const res = await checkDiskSpaceAndAutoDownloadDefaultModel();
+    expect(res.modelId).toBe("smollm2-360m-instruct-q4_k_m");
+    // 3. Mode remains enhanced even if space is insufficient or error occurs
+    expect(res.mode).toBe("enhanced");
+    expect(getStoredParsingMode()).toBe("enhanced");
   });
 
   it("returns disabled reason when stored mode is 'simple'", async () => {
@@ -71,8 +124,7 @@ describe("Model Service & Manifest", () => {
       "insufficient_space",
       "error",
     ]).toContain(res.reason!);
-    if (res.reason === "insufficient_space") {
-      expect(getStoredParsingMode()).toBe("simple");
-    }
+    expect(res.mode).toBe("enhanced");
+    expect(getStoredParsingMode()).toBe("enhanced");
   });
 });

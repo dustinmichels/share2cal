@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-09-07
 
 ### Added
+
 - **Desktop Drag & Drop Image Import (`src-tauri/src/share.rs`, `src-tauri/src/lib.rs`, `src/services/share.ts`, `src/App.vue`, `src/components/UploadHub.vue`)**:
 - Added native desktop drag-and-drop support listening to Tauri webview events (`onDragDropEvent`) when files are dragged from Finder or File Explorer.
 - Added backend command `load_image_from_path` to read dropped image files from filesystem paths into memory payloads with MIME type detection.
@@ -46,6 +47,7 @@
 - **Calendar Integration (`src-tauri/src/calendar.rs`, `src-tauri/src/lib.rs`, `src-tauri/tests/calendar_integration.rs`)**: Added robust prevalidation and mock calendar test utilities for native calendar and batch event creation
 
 ### Changed
+
 - Refined event preview workflow and form handling in App.vue and EventPreviewCard
 - Updated parser and inference pipeline for enhanced multi-event extraction and robustness
 - Updated UI components (`EventFormCard.vue`, `EventPreviewCard.vue`, `SettingsView.vue`) and Tauri IPC bindings (`src/services/calendar.ts`, `src/services/settings.ts`) with advanced calendar settings and event preview workflows

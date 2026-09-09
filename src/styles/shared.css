@@ -167,6 +167,28 @@
   border-top-color: #ffffff;
 }
 
+.spinner-dark {
+  border-color: rgba(0, 0, 0, 0.18);
+  border-top-color: var(--text-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .spinner-dark {
+    border-color: rgba(255, 255, 255, 0.2);
+    border-top-color: #ffffff;
+  }
+}
+
+.empty-card-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.empty-card-actions .btn-touch {
+  max-width: 240px;
+}
+
 @keyframes spinCircle {
   to {
     transform: rotate(360deg);

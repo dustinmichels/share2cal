@@ -23,7 +23,7 @@ export interface EventFormData {
   isAllDay: boolean;
   location: string;
   description: string;
-  url?: string;
+  url: string;
   recurrenceRule?: string;
 }
 
@@ -108,6 +108,55 @@ export async function parseEventFromText(
     timeoutSecs,
     mode,
   });
+}
+
+export interface ProgressiveParseOptions {
+  referenceTime?: string;
+  timezoneOffsetMinutes?: number;
+  modelId?: string;
+  timeoutSecs?: number;
+  skipEnhanced?: boolean;
+  onSimpleResult?: (events: EventDetails[]) => void;
+}
+
+export async function parseEventsProgressive(
+  text: string,
+  options?: ProgressiveParseOptions,
+): Promise<{ simple: EventDetails[]; enhanced?: EventDetails[] }> {
+  const ref = getCurrentReferenceTime();
+  const refTime = options?.referenceTime ?? ref.referenceTime;
+  const tzOffset = options?.timezoneOffsetMinutes ?? ref.timezoneOffsetMinutes;
+
+  const simple = await parseEventsFromText(
+    text,
+    refTime,
+    tzOffset,
+    options?.modelId,
+    options?.timeoutSecs,
+    "simple",
+  );
+
+  if (options?.onSimpleResult) {
+    options.onSimpleResult(simple);
+  }
+
+  if (options?.skipEnhanced) {
+    return { simple };
+  }
+
+  try {
+    const enhanced = await parseEventsFromText(
+      text,
+      refTime,
+      tzOffset,
+      options?.modelId,
+      options?.timeoutSecs,
+      "enhanced",
+    );
+    return { simple, enhanced };
+  } catch {
+    return { simple };
+  }
 }
 
 export async function extractEventsFromImage(

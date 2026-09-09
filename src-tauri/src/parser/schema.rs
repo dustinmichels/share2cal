@@ -91,16 +91,27 @@ pub(crate) fn score_ocr_line(line: &str, line_idx: usize, _total_lines: usize) -
     if trimmed.is_empty() {
         return -100;
     }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("www.")
+        || lower.starts_with("links / qr codes:")
+        || lower.starts_with("qr code:")
+        || lower.starts_with("qr codes:")
+        || lower.starts_with("qr:")
+        || lower.starts_with("url:")
+        || lower.starts_with("link:")
+        || lower.starts_with("links:")
+        || lower.starts_with("website:")
+        || lower.starts_with("zoom:")
+        || lower.starts_with("rsvp:")
+    {
+        return 40;
+    }
     if is_noise_or_metadata_line(trimmed) {
         return -50;
     }
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with('@')
-        || lower.starts_with('#')
-        || lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("www.")
-    {
+    if lower.starts_with('@') || lower.starts_with('#') {
         return -30;
     }
     if trimmed.len() < 3 && !trimmed.chars().all(|c| c.is_ascii_digit()) {
@@ -261,22 +272,36 @@ pub fn generate_extraction_prompt(ocr_text: &str, context: &ReferenceContext) ->
 
     let template_prefix = format!(
         "<|im_start|>system\nYou are a calendar assistant. Extract all events from the OCR text into a JSON object with an \"events\" array.\n\
-        Each event must have fields: \"title\" (string), \"start_time\" (ISO-8601 or YYYY-MM-DD or null), \"end_time\" (ISO-8601 or YYYY-MM-DD or null), \"is_all_day\" (boolean), \"location\" (string or null), \"description\" (string or null), \"recurrence_rule\" (string or null, e.g. FREQ=WEEKLY;BYDAY=MO,WE). Output ONLY raw JSON.\n\
+        Each event must have fields: \"title\" (string), \"start_time\" (ISO-8601 or YYYY-MM-DD or null), \"end_time\" (ISO-8601 or YYYY-MM-DD or null), \"is_all_day\" (boolean), \"location\" (string or null), \"description\" (string or null), \"recurrence_rule\" (string or null, e.g. FREQ=WEEKLY;BYDAY=MO,WE), \"url\" (string or null, e.g. meeting/RSVP link or web URL). Output ONLY raw JSON.\n\
         Reference Time: {} ({})<|im_end|>\n\
         <|im_start|>user\n",
         ref_str, day_name
     );
     let template_suffix = "\n<|im_end|>\n<|im_start|>assistant\n{\"events\": [";
+    let (main_text, links_block) = if let Some(idx) = ocr_text.find("Links / QR Codes:") {
+        (&ocr_text[..idx], Some(&ocr_text[idx..]))
+    } else {
+        (ocr_text, None)
+    };
 
-    let template_tokens = estimate_token_count(&template_prefix) + estimate_token_count(template_suffix);
+    let links_tokens = links_block.map(|l| estimate_token_count(l) + 2).unwrap_or(0);
+    let template_tokens = estimate_token_count(&template_prefix) + estimate_token_count(template_suffix) + links_tokens;
     let ocr_budget = MAX_PROMPT_TOKENS.saturating_sub(template_tokens);
 
-    let effective_ocr_text = trim_ocr_text_to_budget(ocr_text, ocr_budget);
+    let effective_ocr_text = trim_ocr_text_to_budget(main_text, ocr_budget);
+
+    let user_prompt = match links_block {
+        Some(lb) if !effective_ocr_text.trim().is_empty() => {
+            format!("{}\n\n{}", effective_ocr_text.trim(), lb.trim())
+        }
+        Some(lb) => lb.trim().to_string(),
+        None => effective_ocr_text.trim().to_string(),
+    };
 
     format!(
         "{}{}{}",
         template_prefix,
-        effective_ocr_text.trim(),
+        user_prompt,
         template_suffix
     )
 }
@@ -307,9 +332,11 @@ mod tests {
     #[test]
     fn test_dynamic_context_injection_prompt() {
         let ctx = sample_reference_context();
-        let prompt = generate_extraction_prompt("Concert tomorrow at 8pm", &ctx);
+        let prompt = generate_extraction_prompt("Concert tomorrow at 8pm\nLinks / QR Codes: https://example.com/rsvp", &ctx);
         assert!(prompt.contains("Reference Time: 2026-09-06T10:57:00-04:00 (Sunday)"));
         assert!(prompt.contains("Concert tomorrow at 8pm"));
+        assert!(prompt.contains("\"url\" (string or null"));
+        assert!(prompt.contains("https://example.com/rsvp"));
     }
 
     #[test]
@@ -344,6 +371,7 @@ mod tests {
         assert!(prompt.contains("September 19, 2026"));
         assert!(prompt.contains("12:00 PM - 6:00 PM"));
         assert!(prompt.contains("Academic Quad"));
+        assert!(prompt.contains("https://example.com/tickets/long/url/path"));
         // Low-signal noise must be dropped
         assert!(!prompt.contains("@campuslife_official"));
         assert!(!prompt.contains("liked by user123"));

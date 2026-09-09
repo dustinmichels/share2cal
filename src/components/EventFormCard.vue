@@ -16,6 +16,7 @@ const props = withDefaults(
   defineProps<{
     confidence: number;
     isAddingToCalendar?: boolean;
+    isReparsing?: boolean;
     copiedSummary?: boolean;
     currentIndex?: number;
     totalEvents?: number;
@@ -23,10 +24,14 @@ const props = withDefaults(
     defaultTarget?: CalendarTarget;
   }>(),
   {
+    isAddingToCalendar: false,
+    isReparsing: false,
+    copiedSummary: false,
+    currentIndex: 0,
+    totalEvents: 1,
     defaultTarget: "native",
   },
 );
-
 const emit = defineEmits<{
   (e: "addToCalendar"): void;
   (e: "openGoogleCalendar"): void;
@@ -34,6 +39,7 @@ const emit = defineEmits<{
   (e: "copySummary"): void;
   (e: "back"): void;
   (e: "remove"): void;
+  (e: "tryAgain"): void;
 }>();
 
 const confidencePercent = computed(() => Math.round(props.confidence * 100));
@@ -235,7 +241,7 @@ watch(isRepeating, (newVal) => {
       </div>
       <!-- URL / Link Field -->
       <div class="field-item">
-        <label class="field-label" for="event-url">URL / Link</label>
+        <label class="field-label" for="event-url">URL / Meeting Link</label>
         <div class="input-icon-shell">
           <svg
             class="input-leading-icon"
@@ -536,6 +542,35 @@ watch(isRepeating, (newVal) => {
             <span>Copy</span>
           </template>
         </button>
+        <button
+          type="button"
+          class="btn-touch btn-touch-outline btn-try-again"
+          :disabled="isReparsing"
+          title="Re-parse with AI model"
+          @click="emit('tryAgain')"
+        >
+          <template v-if="isReparsing">
+            <div class="spinner-circle spinner-dark"></div>
+            <span>Trying again...</span>
+          </template>
+          <template v-else>
+            <svg
+              class="btn-icon-sm"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 21h5v-5"></path>
+            </svg>
+            <span>Try again</span>
+          </template>
+        </button>
       </div>
       <div v-if="totalEvents && totalEvents > 1" class="delete-action-row">
         <button type="button" class="btn-delete-event" @click="emit('remove')">
@@ -787,7 +822,7 @@ watch(isRepeating, (newVal) => {
 
 .secondary-button-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 0.5rem;
 }
 

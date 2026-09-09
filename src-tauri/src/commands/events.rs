@@ -139,7 +139,7 @@ pub async fn extract_events_from_image(
         timezone_offset_minutes,
     };
 
-    let effective_text = if !spatial_text.trim().is_empty()
+    let base_text = if !spatial_text.trim().is_empty()
         && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
     {
         &spatial_text
@@ -147,9 +147,31 @@ pub async fn extract_events_from_image(
         &ocr_res.text
     };
 
+    let web_qr_codes: Vec<&str> = ocr_res
+        .qr_codes
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| ocr::is_web_link(s))
+        .collect();
+
+    let effective_text = if !web_qr_codes.is_empty() {
+        let mut combined = base_text.trim().to_string();
+        if !combined.is_empty() {
+            combined.push_str("\n\n");
+        }
+        combined.push_str("Links / QR Codes:\n");
+        for qr in &web_qr_codes {
+            combined.push_str(qr);
+            combined.push('\n');
+        }
+        combined
+    } else {
+        base_text.to_string()
+    };
+
     let mut events = parse_events_internal(
         Some(&app),
-        effective_text,
+        &effective_text,
         reference_time,
         timezone_offset_minutes,
         model_id.as_deref(),
@@ -158,14 +180,14 @@ pub async fn extract_events_from_image(
     )
     .await;
 
-    if !ocr_res.qr_codes.is_empty() {
+    if !web_qr_codes.is_empty() {
+        let default_url = web_qr_codes[0];
         for ev in &mut events {
             if ev.url.is_none() {
-                ev.url = Some(ocr_res.qr_codes[0].clone());
+                ev.url = Some(default_url.to_string());
             }
         }
     }
-
     Ok(events)
 }
 
@@ -220,7 +242,7 @@ pub async fn extract_events_from_image_bytes(
         timezone_offset_minutes,
     };
 
-    let effective_text = if !spatial_text.trim().is_empty()
+    let base_text = if !spatial_text.trim().is_empty()
         && parser::parse_schedule_table_events(&spatial_text, &context).len() >= 2
     {
         &spatial_text
@@ -228,9 +250,31 @@ pub async fn extract_events_from_image_bytes(
         &ocr_res.text
     };
 
+    let web_qr_codes: Vec<&str> = ocr_res
+        .qr_codes
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| ocr::is_web_link(s))
+        .collect();
+
+    let effective_text = if !web_qr_codes.is_empty() {
+        let mut combined = base_text.trim().to_string();
+        if !combined.is_empty() {
+            combined.push_str("\n\n");
+        }
+        combined.push_str("Links / QR Codes:\n");
+        for qr in &web_qr_codes {
+            combined.push_str(qr);
+            combined.push('\n');
+        }
+        combined
+    } else {
+        base_text.to_string()
+    };
+
     let mut events = parse_events_internal(
         Some(&app),
-        effective_text,
+        &effective_text,
         reference_time,
         timezone_offset_minutes,
         model_id.as_deref(),
@@ -239,14 +283,14 @@ pub async fn extract_events_from_image_bytes(
     )
     .await;
 
-    if !ocr_res.qr_codes.is_empty() {
+    if !web_qr_codes.is_empty() {
+        let default_url = web_qr_codes[0];
         for ev in &mut events {
             if ev.url.is_none() {
-                ev.url = Some(ocr_res.qr_codes[0].clone());
+                ev.url = Some(default_url.to_string());
             }
         }
     }
-
     Ok(events)
 }
 

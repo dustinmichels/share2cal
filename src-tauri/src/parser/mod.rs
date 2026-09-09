@@ -30,7 +30,7 @@ pub use schema::{
     trim_ocr_text_to_budget, MAX_PROMPT_TOKENS,
 };
 
-use regex::{COURSE_CODE_ANCHORED_RE, DAY_PATTERN_RE, TIME_RANGE_RE};
+use regex::{COURSE_CODE_ANCHORED_RE, DAY_PATTERN_RE, TIME_RANGE_RE, URL_RE, WWW_RE};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventDetails {
@@ -94,20 +94,45 @@ impl ReferenceContext {
 
 /// Deterministic fallback parser implementing multi-event schedule, agenda, and single-event parsing
 pub fn parse_events_deterministic(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
+    let lines: Vec<&str> = ocr_text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let doc_url = extract_url(&lines, ocr_text);
+
     // 1. Try class schedule table parsing
-    let schedule_events = parse_schedule_table_events(ocr_text, context);
+    let mut schedule_events = parse_schedule_table_events(ocr_text, context);
     if schedule_events.len() >= 2 {
+        if let Some(u) = &doc_url {
+            for ev in &mut schedule_events {
+                if ev.url.is_none() {
+                    ev.url = Some(u.clone());
+                }
+            }
+        }
         return schedule_events;
     }
 
     // 2. Try generic agenda / multi-event line parsing
-    let agenda_events = parse_agenda_events(ocr_text, context);
+    let mut agenda_events = parse_agenda_events(ocr_text, context);
     if agenda_events.len() >= 2 {
+        if let Some(u) = &doc_url {
+            for ev in &mut agenda_events {
+                if ev.url.is_none() {
+                    ev.url = Some(u.clone());
+                }
+            }
+        }
         return agenda_events;
     }
 
     // 3. Fallback to single event parsing
-    vec![parse_single_event_deterministic(ocr_text, context)]
+    let mut single = parse_single_event_deterministic(ocr_text, context);
+    if single.url.is_none() && doc_url.is_some() {
+        single.url = doc_url;
+    }
+    vec![single]
 }
 
 /// Compatibility wrapper returning the primary or first extracted event
@@ -341,26 +366,56 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
     }
 }
 
+pub fn clean_extracted_url(s: &str) -> String {
+    s.trim()
+        .trim_end_matches(['.', ',', ';', ')', '>', ']', '\'', '"'])
+        .to_string()
+}
+
 /// Extracts a web link or URL from text or labeled lines
-fn extract_url(lines: &[&str], text: &str) -> Option<String> {
-    for line in lines {
+pub fn extract_url(lines: &[&str], text: &str) -> Option<String> {
+    // 1. Check labeled lines (Links / QR Codes:, URL:, Link:, Website:, Zoom:, RSVP:)
+    for (i, line) in lines.iter().enumerate() {
         let lower = line.to_lowercase();
-        if lower.starts_with("url:")
+        if lower.starts_with("links / qr codes:")
+            || lower.starts_with("qr code:")
+            || lower.starts_with("qr codes:")
+            || lower.starts_with("qr:")
+            || lower.starts_with("url:")
             || lower.starts_with("link:")
+            || lower.starts_with("links:")
             || lower.starts_with("website:")
             || lower.starts_with("zoom:")
+            || lower.starts_with("rsvp:")
         {
             if let Some(pos) = line.find(':') {
                 let candidate = line[pos + 1..].trim();
                 if candidate.starts_with("http://") || candidate.starts_with("https://") {
-                    return Some(candidate.to_string());
+                    return Some(clean_extracted_url(candidate));
+                }
+            }
+            // If label is on its own line, check subsequent lines for a link
+            if i + 1 < lines.len() {
+                let next = lines[i + 1].trim();
+                if next.starts_with("http://") || next.starts_with("https://") {
+                    return Some(clean_extracted_url(next));
                 }
             }
         }
     }
-    let re = ::regex::Regex::new(r#"(?i)\bhttps?://[^\s<>"{}|\\^`\[\]]+"#).ok()?;
-    if let Some(m) = re.find(text) {
-        return Some(m.as_str().to_string());
+    // 2. Check if text has any explicit http:// or https:// URL
+    if let Some(m) = URL_RE.find(text) {
+        let candidate = clean_extracted_url(m.as_str());
+        if !candidate.is_empty() {
+            return Some(candidate);
+        }
+    }
+    // 3. Check for www. web links
+    if let Some(m) = WWW_RE.find(text) {
+        let candidate = clean_extracted_url(m.as_str());
+        if !candidate.is_empty() {
+            return Some(format!("https://{}", candidate));
+        }
     }
     None
 }
@@ -773,5 +828,120 @@ Remote viewers: go.tufts.edu/HOCU0910"#;
 
         assert_eq!(event.start_time.as_deref(), Some("2026-09-11T19:00:00-04:00"));
         assert_eq!(event.recurrence_rule, None, "Prose containing 'We' should not fabricate recurrence rule");
+    }
+
+    #[test]
+    fn test_event_details_url_serde_backward_compatibility() {
+        // Legacy JSON without url field
+        let legacy_json = r#"{
+            "title": "Old Event",
+            "start_time": "2026-09-10T12:00:00Z",
+            "end_time": "2026-09-10T13:00:00Z",
+            "is_all_day": false,
+            "location": "Room 101",
+            "description": "Legacy event description",
+            "confidence": 0.9,
+            "source": "deterministic"
+        }"#;
+        let event: EventDetails = serde_json::from_str(legacy_json).expect("Legacy JSON should deserialize");
+        assert_eq!(event.title, "Old Event");
+        assert_eq!(event.url, None);
+
+        // Serializing with url: None should omit url field (skip_serializing_if = Option::is_none)
+        let serialized_none = serde_json::to_string(&event).expect("Serialize none");
+        assert!(!serialized_none.contains("\"url\""));
+
+        // Modern JSON with url field
+        let modern_json = r#"{
+            "title": "Webinar Event",
+            "start_time": "2026-09-10T12:00:00Z",
+            "end_time": "2026-09-10T13:00:00Z",
+            "is_all_day": false,
+            "location": "Online",
+            "description": "Webinar",
+            "url": "https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw",
+            "confidence": 0.95,
+            "source": "deterministic"
+        }"#;
+        let modern_event: EventDetails = serde_json::from_str(modern_json).expect("Modern JSON should deserialize");
+        assert_eq!(
+            modern_event.url.as_deref(),
+            Some("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw")
+        );
+
+        // Round-trip serialization
+        let serialized_some = serde_json::to_string(&modern_event).expect("Serialize some");
+        assert!(serialized_some.contains("\"url\":\"https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw\""));
+        let roundtrip: EventDetails = serde_json::from_str(&serialized_some).expect("Deserialize roundtrip");
+        assert_eq!(modern_event.url, roundtrip.url);
+    }
+
+    #[test]
+    fn test_parse_commons_flyer_with_qr_codes_section_deterministic() {
+        let ocr_text = r#"CAMPUS AS COMMONS:
+Agroforestry and Shared Stewardship at Tufts
+Mary Mattingly
+Visiting Artist, Center for the Humanities at Tufts
+Luits
+UNIVERSITY
+School of Arts and Sciences
+Environmental Studies
+Hoch Cunningham Environmental Lectures
+Architectural Studies Program
+Center for the Humanities at Tufts, University Ecologies
+THURS. 9/10, 12-1PM
+Curtis Hall Multipurpose Room
+Remote viewers: go.tufts.edu/HOCU0910
+
+Links / QR Codes:
+https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw"#;
+
+        let ctx = sample_reference_context(); // Reference 2026-09-06
+        let event = parse_event_deterministic(ocr_text, &ctx);
+
+        assert!(event.title.contains("CAMPUS AS COMMONS") && event.title.contains("Agroforestry"));
+        assert_eq!(event.start_time.as_deref(), Some("2026-09-10T12:00:00-04:00"));
+        assert_eq!(event.end_time.as_deref(), Some("2026-09-10T13:00:00-04:00"));
+        assert!(!event.is_all_day);
+        assert_eq!(event.location.as_deref(), Some("Curtis Hall Multipurpose Room"));
+        assert_eq!(
+            event.url.as_deref(),
+            Some("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw")
+        );
+        assert!(event.description.is_some());
+        let desc = event.description.unwrap();
+        assert!(desc.contains("Mary Mattingly") || desc.contains("Remote viewers"));
+        assert!(!desc.contains("Links / QR Codes"));
+    }
+
+    #[test]
+    fn test_extract_url_patterns() {
+        let text1 = "Event\nLinks / QR Codes: https://example.com/webinar/register";
+        let lines1: Vec<&str> = text1.lines().collect();
+        assert_eq!(
+            extract_url(&lines1, text1).as_deref(),
+            Some("https://example.com/webinar/register")
+        );
+
+        let text2 = "Event\nLinks / QR Codes:\nhttps://example.com/zoom/meeting";
+        let lines2: Vec<&str> = text2.lines().collect();
+        assert_eq!(
+            extract_url(&lines2, text2).as_deref(),
+            Some("https://example.com/zoom/meeting")
+        );
+
+        let text3 = "Meeting in Room 3B (see https://tufts.zoom.us/j/123456789).";
+        let lines3: Vec<&str> = text3.lines().collect();
+        assert_eq!(
+            extract_url(&lines3, text3).as_deref(),
+            Some("https://tufts.zoom.us/j/123456789")
+        );
+
+        let text4 = "Register at www.communitygarden.org/events/rsvp, today!";
+        let lines4: Vec<&str> = text4.lines().collect();
+        assert_eq!(
+            extract_url(&lines4, text4).as_deref(),
+            Some("https://www.communitygarden.org/events/rsvp")
+        );
     }
 }

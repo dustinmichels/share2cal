@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { CalendarInfo } from "../services/calendar";
 import type { CalendarTarget } from "../services/settings";
 import {
@@ -16,6 +17,7 @@ const props = withDefaults(
   defineProps<{
     events: EventDetails[];
     isAddingToCalendar?: boolean;
+    isReparsing?: boolean;
     copiedSummary?: boolean;
     addedIndices?: Set<number>;
     availableCalendars?: CalendarInfo[];
@@ -23,8 +25,8 @@ const props = withDefaults(
     hideHeader?: boolean;
   }>(),
   {
+    isReparsing: false,
     defaultTarget: "native",
-    hideHeader: false,
   },
 );
 
@@ -35,6 +37,7 @@ const emit = defineEmits<{
   (e: "exportIcs"): void;
   (e: "copySummary"): void;
   (e: "removeEvent", index: number): void;
+  (e: "tryAgain"): void;
 }>();
 interface WeekPreviewEvent {
   event: EventDetails;
@@ -175,6 +178,19 @@ function formatEventTiming(event: EventDetails): string {
   }
   return dateStr;
 }
+
+async function handleOpenUrl(e: MouseEvent, url?: string | null) {
+  if (!url) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await openUrl(url);
+  } catch {
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
+  }
+}
 </script>
 
 <template>
@@ -247,9 +263,7 @@ function formatEventTiming(event: EventDetails): string {
       <div class="week-preview-heading">
         <div>
           <h3 class="week-preview-title">Calendar View</h3>
-          <p class="week-preview-subtitle">
-            A calendar view of where the event dates land.
-          </p>
+          <p class="week-preview-subtitle">A calendar view of where the event dates land.</p>
         </div>
         <span class="badge-pill week-preview-count"
           >{{ eventCount }} {{ eventCount === 1 ? "event" : "events" }}</span
@@ -293,8 +307,14 @@ function formatEventTiming(event: EventDetails): string {
         </section>
       </div>
       <div v-else class="week-empty-notice">
-        <p class="week-empty-text">No scheduled dates found in event(s). Switch to Detail View to review dates.</p>
-        <button type="button" class="btn-touch btn-touch-outline btn-switch-details" @click="previewMode = 'details'">
+        <p class="week-empty-text">
+          No scheduled dates found in event(s). Switch to Detail View to review dates.
+        </p>
+        <button
+          type="button"
+          class="btn-touch btn-touch-outline btn-switch-details"
+          @click="previewMode = 'details'"
+        >
           Switch to Detail View
         </button>
       </div>
@@ -449,7 +469,29 @@ function formatEventTiming(event: EventDetails): string {
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
             </svg>
-            <span class="meta-text meta-url-text">{{ event.url }}</span>
+            <a
+              :href="event.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="meta-url-badge"
+              title="Open link"
+              @click="handleOpenUrl($event, event.url)"
+            >
+              <span class="meta-url-text">{{ event.url }}</span>
+              <svg
+                class="meta-url-external-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
           </div>
         </div>
 
@@ -687,6 +729,35 @@ function formatEventTiming(event: EventDetails): string {
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
           <span>{{ copiedSummary ? "Copied!" : isMultiple ? "Copy All" : "Copy Details" }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn-touch btn-touch-outline btn-try-again"
+          :disabled="isReparsing"
+          title="Re-parse with AI model"
+          @click="emit('tryAgain')"
+        >
+          <template v-if="isReparsing">
+            <div class="spinner-circle spinner-dark"></div>
+            <span>Trying again...</span>
+          </template>
+          <template v-else>
+            <svg
+              class="btn-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 21h5v-5"></path>
+            </svg>
+            <span>Try again</span>
+          </template>
         </button>
       </div>
     </div>
@@ -1138,6 +1209,45 @@ function formatEventTiming(event: EventDetails): string {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.meta-row-url {
+  align-items: center;
+}
+
+.meta-url-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: var(--bg-surface-elevated, rgba(59, 130, 246, 0.08));
+  border: 1px solid var(--border-card-subtle, rgba(59, 130, 246, 0.2));
+  color: var(--accent-primary, #3b82f6);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.meta-url-badge:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--accent-primary, #3b82f6);
+  text-decoration: underline;
+}
+
+.meta-url-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-url-external-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 .preview-item-footer {

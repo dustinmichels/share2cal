@@ -652,6 +652,7 @@ mod tests {
         let created = mock::get_created_events();
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].event.title, "Test Isolation Event");
+        assert_eq!(created[0].event.url.as_deref(), Some("https://example.com/event"));
         mock::clear_created_events();
     }
 
@@ -691,6 +692,58 @@ mod tests {
         // Prevalidation ensures the first valid event was never created
         let created = mock::get_created_events();
         assert_eq!(created.len(), 0, "No event should have been created on batch validation failure");
+        mock::clear_created_events();
+    }
+
+    #[test]
+    fn test_create_events_batch_url_persistence() {
+        let _guard = TEST_CALENDAR_MUTEX.lock();
+        mock::clear_created_events();
+
+        let event1 = EventDetails {
+            title: "Webinar Event".to_string(),
+            start_time: Some("2026-09-10T12:00:00-04:00".to_string()),
+            end_time: Some("2026-09-10T13:00:00-04:00".to_string()),
+            is_all_day: false,
+            location: Some("Curtis Hall".to_string()),
+            description: Some("Visiting Artist lecture".to_string()),
+            recurrence_rule: None,
+            url: Some("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw".to_string()),
+            confidence: 0.95,
+            source: "ocr".to_string(),
+        };
+
+        let event2 = EventDetails {
+            title: "Concert Event".to_string(),
+            start_time: Some("2026-09-12T19:00:00-04:00".to_string()),
+            end_time: Some("2026-09-12T22:00:00-04:00".to_string()),
+            is_all_day: false,
+            location: Some("Main Stage".to_string()),
+            description: Some("Live Performance".to_string()),
+            recurrence_rule: None,
+            url: Some("https://example.com/tickets".to_string()),
+            confidence: 0.95,
+            source: "ocr".to_string(),
+        };
+
+        let result = create_events(&[event1, event2], None, None, None);
+        assert!(result.is_ok(), "Batch creation should succeed");
+        let ids = result.unwrap();
+        assert_eq!(ids.len(), 2);
+
+        let created = mock::get_created_events();
+        assert_eq!(created.len(), 2);
+        assert_eq!(created[0].event.title, "Webinar Event");
+        assert_eq!(
+            created[0].event.url.as_deref(),
+            Some("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw")
+        );
+        assert_eq!(created[1].event.title, "Concert Event");
+        assert_eq!(
+            created[1].event.url.as_deref(),
+            Some("https://example.com/tickets")
+        );
+
         mock::clear_created_events();
     }
 }
