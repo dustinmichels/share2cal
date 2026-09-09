@@ -62,6 +62,16 @@
 
 ---
 
+## samples/commons.jpg
+
+- **Title:** CAMPUS AS COMMONS: Agroforestry and Shared Stewardship at Tufts
+- **Date/Time:** Thursday, September 10, 2026, 12:00 PM – 1:00 PM
+- **Location:** Curtis Hall Multipurpose Room
+- **Details:** Mary Mattingly, Visiting Artist, Center for the Humanities at Tufts. Remote viewers: go.tufts.edu/HOCU0910
+- **URL:** https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw
+- **Repeating:** false
+---
+
 ## samples/gilman_flyer.png
 
 - **Title:** SomerStreets Gilman Square Arts & Music Festival

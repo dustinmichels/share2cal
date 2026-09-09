@@ -107,6 +107,7 @@ pub fn parse_agenda_events(ocr_text: &str, context: &ReferenceContext) -> Vec<Ev
                         location,
                         description: None,
                         recurrence_rule,
+                        url: None,
                         confidence: 0.90,
                         source: "deterministic_agenda".to_string(),
                     });

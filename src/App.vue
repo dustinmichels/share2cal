@@ -218,6 +218,7 @@ function syncFormFromEvent(event: EventDetails) {
     isAllDay: event.is_all_day,
     location: event.location || "",
     description: event.description || "",
+    url: event.url || "",
     recurrenceRule: event.recurrence_rule || "",
   };
 }
@@ -418,6 +419,7 @@ function getComposedEvent(): EventDetails {
     location: eventForm.value.location.trim() || null,
     description: eventForm.value.description.trim() || null,
     recurrence_rule: eventForm.value.recurrenceRule?.trim() || null,
+    url: eventForm.value.url?.trim() || null,
     confidence:
       selectedEventIndex.value !== null
         ? (eventsList.value[selectedEventIndex.value]?.confidence ?? 0.8)

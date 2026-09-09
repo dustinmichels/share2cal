@@ -9,6 +9,7 @@ export interface EventDetails {
   is_all_day: boolean;
   location: string | null;
   description: string | null;
+  url?: string | null;
   recurrence_rule?: string | null;
   confidence: number;
   source: string;
@@ -22,6 +23,7 @@ export interface EventFormData {
   isAllDay: boolean;
   location: string;
   description: string;
+  url?: string;
   recurrenceRule?: string;
 }
 
@@ -545,11 +547,11 @@ export function generateIcsCalendarContent(event: EventDetails): string {
   const description = event.description
     ? `DESCRIPTION:${escapeIcsText(event.description)}\r\n`
     : "";
+  const url = event.url && event.url.trim() ? `URL:${event.url.trim()}\r\n` : "";
   const validatedRecurrence = event.recurrence_rule
     ? buildRecurrenceRule(parseRecurrenceRule(event.recurrence_rule))
     : null;
   const rrule = validatedRecurrence ? `RRULE:${validatedRecurrence}` : null;
-
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -565,6 +567,7 @@ export function generateIcsCalendarContent(event: EventDetails): string {
     `SUMMARY:${summary}`,
     location ? location.trimEnd() : null,
     description ? description.trimEnd() : null,
+    url ? url.trimEnd() : null,
     "STATUS:CONFIRMED",
     "END:VEVENT",
     "END:VCALENDAR",
@@ -663,11 +666,11 @@ export function generateMultiIcsCalendarContent(events: EventDetails[]): string 
     const description = event.description
       ? `DESCRIPTION:${escapeIcsText(event.description)}\r\n`
       : "";
+    const url = event.url && event.url.trim() ? `URL:${event.url.trim()}\r\n` : "";
     const validatedRecurrence = event.recurrence_rule
       ? buildRecurrenceRule(parseRecurrenceRule(event.recurrence_rule))
       : null;
     const rrule = validatedRecurrence ? `RRULE:${validatedRecurrence}` : null;
-
     return [
       "BEGIN:VEVENT",
       `UID:${uid}`,
@@ -678,6 +681,7 @@ export function generateMultiIcsCalendarContent(events: EventDetails[]): string 
       `SUMMARY:${summary}`,
       location ? location.trimEnd() : null,
       description ? description.trimEnd() : null,
+      url ? url.trimEnd() : null,
       "STATUS:CONFIRMED",
       "END:VEVENT",
     ]

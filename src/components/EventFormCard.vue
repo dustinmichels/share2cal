@@ -233,6 +233,31 @@ watch(isRepeating, (newVal) => {
           />
         </div>
       </div>
+      <!-- URL / Link Field -->
+      <div class="field-item">
+        <label class="field-label" for="event-url">URL / Link</label>
+        <div class="input-icon-shell">
+          <svg
+            class="input-leading-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+          <input
+            id="event-url"
+            v-model="model.url"
+            type="url"
+            class="field-input field-input-with-icon"
+            placeholder="e.g. https://tufts.zoom.us/..."
+          />
+        </div>
+      </div>
       <!-- Recurrence / Repeat Section -->
       <div class="field-item recurrence-card-section">
         <div class="toggle-control-row">

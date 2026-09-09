@@ -17,6 +17,8 @@ pub struct ParsedJsonEvent {
     pub repeating: Option<bool>,
     pub location: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 pub fn get_sample_path(filename: &str) -> PathBuf {
@@ -290,6 +292,25 @@ pub fn match_recurrence_rule(actual: Option<&str>, expected: &ParsedJsonEvent) -
     check_recurrence_rule(actual, expected).is_ok()
 }
 
+/// Checks URL: matches exact or substring, or passes if expected is None
+pub fn check_url(actual: Option<&str>, expected: Option<&str>) -> Result<(), String> {
+    match (actual, expected) {
+        (None, None) => Ok(()),
+        (Some(_), None) => Ok(()),
+        (None, Some(e)) if e.trim().is_empty() => Ok(()),
+        (None, Some(e)) => Err(format!("Expected URL {:?}, but got None", e)),
+        (Some(a), Some(e)) => {
+            let a_clean = a.trim();
+            let e_clean = e.trim();
+            if a_clean == e_clean || a_clean.contains(e_clean) || e_clean.contains(a_clean) {
+                Ok(())
+            } else {
+                Err(format!("URL mismatch: expected {:?}, got {:?}", e, a))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SampleMismatch {
     pub sample_path: String,
@@ -369,6 +390,14 @@ pub fn validate_event_against_parsed_json(
             sample_path: sample_name.to_string(),
             event_index: Some(event_idx),
             message: format!("Recurrence rule mismatch: {}", err),
+        });
+    }
+
+    if let Err(err) = check_url(actual.url.as_deref(), expected.url.as_deref()) {
+        mismatches.push(SampleMismatch {
+            sample_path: sample_name.to_string(),
+            event_index: Some(event_idx),
+            message: format!("URL mismatch: {}", err),
         });
     }
 

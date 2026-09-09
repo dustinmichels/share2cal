@@ -24,6 +24,7 @@ export interface ParsedJsonEntry {
   repeating?: boolean;
   location: string | null;
   description: string | null;
+  url?: string | null;
 }
 
 function parseTimeTo24h(timeStr: string | null | undefined): string | null {
@@ -127,9 +128,9 @@ function parsedJsonEntryToEventDetails(raw: ParsedJsonEntry, refDate = "2026-09-
     is_all_day: isAllDay,
     location: raw.location ?? null,
     description: raw.description ?? null,
+    url: raw.url ?? null,
     recurrence_rule: recurrenceRule,
     confidence: 0.95,
-    source: isRepeating ? "deterministic_schedule" : "deterministic_flyer",
   };
 }
 
@@ -138,20 +139,21 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
 
   const classEntries = samplesManifest["samples/class.png"];
   const classesEntries = samplesManifest["samples/classes.png"];
+  const commonsEntries = samplesManifest["samples/commons.jpg"];
   const gilmanFlyerEntries = samplesManifest["samples/gilman_flyer.png"];
   const instagramEntries = samplesManifest["samples/instagram.png"];
   const rideForLifeEntries = samplesManifest["samples/ride_for_life.png"];
   const squirrelFlowerEntries = samplesManifest["samples/squirrel_flower.jpg"];
 
-  it("loads all 6 sample image ground truths from samples/parsed.json", () => {
+  it("loads all 7 sample image ground truths from samples/parsed.json", () => {
     expect(classEntries.length).toBe(1);
     expect(classesEntries.length).toBe(6);
+    expect(commonsEntries.length).toBe(1);
     expect(gilmanFlyerEntries.length).toBe(1);
     expect(instagramEntries.length).toBe(1);
     expect(rideForLifeEntries.length).toBe(1);
     expect(squirrelFlowerEntries.length).toBe(1);
   });
-
   describe("Multi-Event & Single-Event ICS Generation from parsed.json", () => {
     it("generates a multi-event RFC 5545 iCalendar (.ics) string for classes.png with 6 distinct VEVENT blocks", () => {
       const sampleEvents: EventDetails[] = classesEntries.map((e) =>
@@ -253,6 +255,20 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
       expect(ics).toContain("LOCATION:Boston\\, MA");
       expect(ics).toContain("DTSTART;VALUE=DATE:20261025");
       expect(ics).toContain("DTEND;VALUE=DATE:20261025");
+    });
+
+    it("generates single event ICS correctly for commons.jpg (Campus as Commons with QR code webinar URL)", () => {
+      const event = parsedJsonEntryToEventDetails(commonsEntries[0]);
+      expect(event.url).toBe("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+
+      const ics = generateIcsCalendarContent(event);
+      expect(ics).toStartWith("BEGIN:VCALENDAR");
+      expect(ics).toEndWith("END:VCALENDAR");
+      expect(ics).toContain("SUMMARY:CAMPUS AS COMMONS: Agroforestry and Shared Stewardship at Tufts");
+      expect(ics).toContain("LOCATION:Curtis Hall Multipurpose Room");
+      expect(ics).toContain("DTSTART:20260910T120000Z");
+      expect(ics).toContain("DTEND:20260910T130000Z");
+      expect(ics).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
     });
   });
 

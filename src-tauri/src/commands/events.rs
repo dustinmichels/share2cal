@@ -147,7 +147,7 @@ pub async fn extract_events_from_image(
         &ocr_res.text
     };
 
-    Ok(parse_events_internal(
+    let mut events = parse_events_internal(
         Some(&app),
         effective_text,
         reference_time,
@@ -156,7 +156,17 @@ pub async fn extract_events_from_image(
         timeout_secs,
         mode.as_deref(),
     )
-    .await)
+    .await;
+
+    if !ocr_res.qr_codes.is_empty() {
+        for ev in &mut events {
+            if ev.url.is_none() {
+                ev.url = Some(ocr_res.qr_codes[0].clone());
+            }
+        }
+    }
+
+    Ok(events)
 }
 
 #[tauri::command]
@@ -187,6 +197,7 @@ pub async fn extract_event_from_image(
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.5,
         source: "empty".to_string(),
     }))
@@ -217,7 +228,7 @@ pub async fn extract_events_from_image_bytes(
         &ocr_res.text
     };
 
-    Ok(parse_events_internal(
+    let mut events = parse_events_internal(
         Some(&app),
         effective_text,
         reference_time,
@@ -226,7 +237,17 @@ pub async fn extract_events_from_image_bytes(
         timeout_secs,
         mode.as_deref(),
     )
-    .await)
+    .await;
+
+    if !ocr_res.qr_codes.is_empty() {
+        for ev in &mut events {
+            if ev.url.is_none() {
+                ev.url = Some(ocr_res.qr_codes[0].clone());
+            }
+        }
+    }
+
+    Ok(events)
 }
 
 #[tauri::command]
@@ -257,6 +278,7 @@ pub async fn extract_event_from_image_bytes(
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.5,
         source: "empty".to_string(),
     }))

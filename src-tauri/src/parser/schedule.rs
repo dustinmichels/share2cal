@@ -234,6 +234,7 @@ pub fn parse_row_schedule_table_events(ocr_text: &str, context: &ReferenceContex
                 location,
                 description,
                 recurrence_rule,
+                url: None,
                 confidence: 0.95,
                 source: "deterministic_schedule".to_string(),
             });
@@ -391,6 +392,7 @@ pub fn parse_columnar_schedule_table_events(ocr_text: &str, context: &ReferenceC
                 location: next_line_opt.clone(),
                 description,
                 recurrence_rule,
+                url: None,
                 confidence: 0.90,
                 source: "deterministic_schedule_columnar".to_string(),
             });

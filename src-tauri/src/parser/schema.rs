@@ -12,7 +12,7 @@ pub const MAX_PROMPT_TOKENS: usize = (DEFAULT_CONTEXT_WINDOW as usize) - MAX_OUT
 pub fn get_gbnf_grammar() -> &'static str {
     r#"root ::= ws "{" ws "\"events\":" ws "[" ws event-list? ws "]" ws "}" ws
 event-list ::= event ("," ws event)*
-event ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws optstring "," ws "\"end_time\":" ws optstring "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws optstring "," ws "\"description\":" ws optstring "," ws "\"recurrence_rule\":" ws optstring "}"
+event ::= "{" ws "\"title\":" ws string "," ws "\"start_time\":" ws optstring "," ws "\"end_time\":" ws optstring "," ws "\"is_all_day\":" ws boolean "," ws "\"location\":" ws optstring "," ws "\"description\":" ws optstring "," ws "\"recurrence_rule\":" ws optstring "," ws "\"url\":" ws optstring "}"
 string ::= "\"" ([^"\\\r\n] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* "\"" ws
 optstring ::= ("null" | string) ws
 boolean ::= ("true" | "false") ws
@@ -60,10 +60,13 @@ pub fn get_json_schema() -> serde_json::Value {
                         "recurrence_rule": {
                             "type": ["string", "null"],
                             "description": "RFC 5545 RRULE string for repeating events (e.g. 'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z' or 'FREQ=WEEKLY;BYDAY=TU,TH'). Null if the event does not repeat."
+                        },
+                        "url": {
+                            "type": ["string", "null"],
+                            "description": "Web link, webinar, meeting, or RSVP URL associated with the event (e.g. Zoom or event registration link)."
                         }
                     },
-                    "required": ["title", "start_time", "end_time", "is_all_day", "location", "description", "recurrence_rule"],
-                    "additionalProperties": false
+                    "required": ["title", "start_time", "end_time", "is_all_day", "location", "description", "recurrence_rule", "url"],
                 }
             }
         },

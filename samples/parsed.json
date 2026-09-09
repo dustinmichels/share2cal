@@ -9,7 +9,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Eliot-Pearson, Room 157",
-      "description": "Faculty: Julie Dobrow | Units: 3.00 | Status: Open / In Cart. (Cross-listed with CSHD 162 and FMS 170) Examination of why children have long been considered a \"special\" audience by broadcasters, advertisers, politicians, educators, and researchers. Critical study of theory and research on children's media use and its effects. Exploration of how media consumption relates to developmental issues, patterns of use, and the content and context of children's media, including television, film/video, advertising, games, podcasts, and social media. Analysis of both theoretical frameworks and empirical evidence to explore topics including gender and ethnic stereotyping, sexual and violent content, educational and \"pro-social\" effects of media, and the links between media use and increases in childhood obesity. Projects, media assessments, research critiques, and an original research proposal."
+      "description": "Faculty: Julie Dobrow | Units: 3.00 | Status: Open / In Cart. (Cross-listed with CSHD 162 and FMS 170) Examination of why children have long been considered a \"special\" audience by broadcasters, advertisers, politicians, educators, and researchers. Critical study of theory and research on children's media use and its effects. Exploration of how media consumption relates to developmental issues, patterns of use, and the content and context of children's media, including television, film/video, advertising, games, podcasts, and social media. Analysis of both theoretical frameworks and empirical evidence to explore topics including gender and ethnic stereotyping, sexual and violent content, educational and \"pro-social\" effects of media, and the links between media use and increases in childhood obesity. Projects, media assessments, research critiques, and an original research proposal.",
+      "url": null
     }
   ],
   "samples/classes.png": [
@@ -22,7 +23,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Anderson Wing TTC, Room 306",
-      "description": "Faculty: L. Abrams"
+      "description": "Faculty: L. Abrams",
+      "url": null
     },
     {
       "title": "CS 0150-09 (84779) Special Topics - Analysis Mthds Images, Text & (Lecture)",
@@ -33,7 +35,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Online",
-      "description": "Faculty: J. Skripchuk"
+      "description": "Faculty: J. Skripchuk",
+      "url": null
     },
     {
       "title": "CSHD 0166-01 (82454) Children's Play (Lecture)",
@@ -44,7 +47,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Eliot-Pearson, Room 157",
-      "description": "Faculty: W. Scarlett"
+      "description": "Faculty: W. Scarlett",
+      "url": null
     },
     {
       "title": "CSHD 0167-01 (80739) Children & Media (Lecture)",
@@ -55,7 +59,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Eaton Hall, 201",
-      "description": "Faculty: J. Dobrow"
+      "description": "Faculty: J. Dobrow",
+      "url": null
     },
     {
       "title": "UEP 0254-01 (81300) Quantitative Reasoning (Lecture)",
@@ -66,7 +71,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Joyce Cummings Center, 302",
-      "description": "Faculty: S. Shamsuddin"
+      "description": "Faculty: S. Shamsuddin",
+      "url": null
     },
     {
       "title": "UEP 0262-01 (82571) Solidarity Economy Movements (Seminar)",
@@ -77,7 +83,8 @@
       "is_all_day": false,
       "repeating": true,
       "location": "Bromfield-Pearson, Room 006",
-      "description": "Faculty: P. Loh"
+      "description": "Faculty: P. Loh",
+      "url": null
     }
   ],
   "samples/commons.jpg": [
@@ -90,7 +97,8 @@
       "is_all_day": false,
       "repeating": false,
       "location": "Curtis Hall Multipurpose Room",
-      "description": "Mary Mattingly, Visiting Artist, Center for the Humanities at Tufts. Remote viewers: go.tufts.edu/HOCU0910"
+      "description": "Mary Mattingly, Visiting Artist, Center for the Humanities at Tufts. Remote viewers: go.tufts.edu/HOCU0910",
+      "url": "https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw"
     }
   ],
   "samples/gilman_flyer.png": [
@@ -103,7 +111,8 @@
       "is_all_day": false,
       "repeating": false,
       "location": "Ed Leathers Park, Walnut Street and Skilton Ave",
-      "description": "Live Music & Performances, Beer Garden, Food Vendors, Artists & Makers, Kids Activities. (Rain Date: Sunday, September 13, 2026)"
+      "description": "Live Music & Performances, Beer Garden, Food Vendors, Artists & Makers, Kids Activities. (Rain Date: Sunday, September 13, 2026)",
+      "url": null
     }
   ],
   "samples/instagram.png": [
@@ -116,7 +125,8 @@
       "is_all_day": false,
       "repeating": false,
       "location": "BP Lawn",
-      "description": "We invite you to have dessert with us. Don’t like ice cream? We have iced coffee, iced tea, and fruit too!"
+      "description": "We invite you to have dessert with us. Don’t like ice cream? We have iced coffee, iced tea, and fruit too!",
+      "url": null
     }
   ],
   "samples/ride_for_life.png": [
@@ -129,7 +139,8 @@
       "is_all_day": true,
       "repeating": false,
       "location": "Boston, MA",
-      "description": "RIDE. WALK. RALLY. OUR STREETS EXIST For EVERYONE."
+      "description": "RIDE. WALK. RALLY. OUR STREETS EXIST For EVERYONE.",
+      "url": null
     }
   ],
   "samples/squirrel_flower.jpg": [
@@ -142,7 +153,8 @@
       "is_all_day": true,
       "repeating": false,
       "location": "Crystal Ballroom, Somerville, MA",
-      "description": "Squirrel Flower 2026 Tour with supporting artist youbet."
+      "description": "Squirrel Flower 2026 Tour with supporting artist youbet.",
+      "url": null
     }
   ]
 }

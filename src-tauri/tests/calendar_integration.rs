@@ -33,6 +33,7 @@ fn test_create_calendar_event_empty_title_rejection() {
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.95,
         source: "test".to_string(),
     };
@@ -52,6 +53,7 @@ fn test_create_calendar_event_whitespace_title_rejection() {
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.95,
         source: "test".to_string(),
     };
@@ -71,6 +73,7 @@ fn test_create_calendar_event_invalid_recurrence_rule() {
         location: None,
         description: None,
         recurrence_rule: Some("INTERVAL=2;BYDAY=MO".to_string()), // Missing required FREQ
+        url: None,
         confidence: 0.95,
         source: "test".to_string(),
     };
@@ -102,6 +105,7 @@ fn test_create_calendar_event_mock_isolation_prevents_real_calendar_writes() {
         location: Some("Test Lab".to_string()),
         description: Some("Integration test event for mock calendar isolation".to_string()),
         recurrence_rule: None,
+        url: Some("https://tufts.zoom.us/test".to_string()),
         confidence: 0.95,
         source: "test".to_string(),
     };
@@ -118,6 +122,7 @@ fn test_create_calendar_event_mock_isolation_prevents_real_calendar_writes() {
     let recorded = get_mock_created_events();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].event.title, "Integration Test Valid Event");
+    assert_eq!(recorded[0].event.url.as_deref(), Some("https://tufts.zoom.us/test"));
     clear_mock_created_events();
 }
 
@@ -133,6 +138,7 @@ fn test_create_calendar_events_batch_validation() {
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.95,
         source: "test".to_string(),
     };
@@ -144,6 +150,7 @@ fn test_create_calendar_events_batch_validation() {
         location: None,
         description: None,
         recurrence_rule: None,
+        url: None,
         confidence: 0.95,
         source: "test".to_string(),
     };

@@ -198,7 +198,10 @@ mod apple {
             Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
             None => None,
         };
-        let url_c: Option<CString> = None; // Reserved for URL if extended
+        let url_c = match event.url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => Some(CString::new(s).map_err(|e| AppError::Calendar(e.to_string()))?),
+            None => None,
+        };
 
         let recurrence_rule_c = match event.recurrence_rule.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => {
@@ -538,6 +541,7 @@ mod tests {
             location: None,
             description: None,
             recurrence_rule: None,
+            url: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -557,6 +561,7 @@ mod tests {
             location: None,
             description: None,
             recurrence_rule: None,
+            url: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -576,6 +581,7 @@ mod tests {
             location: None,
             description: None,
             recurrence_rule: Some("INTERVAL=2;BYDAY=MO".to_string()), // Missing required FREQ
+            url: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -633,6 +639,7 @@ mod tests {
             location: Some("Virtual".to_string()),
             description: Some("Test description".to_string()),
             recurrence_rule: None,
+            url: Some("https://example.com/event".to_string()),
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -660,6 +667,7 @@ mod tests {
             location: None,
             description: None,
             recurrence_rule: None,
+            url: None,
             confidence: 0.95,
             source: "test".to_string(),
         };
@@ -671,6 +679,7 @@ mod tests {
             location: None,
             description: None,
             recurrence_rule: None,
+            url: None,
             confidence: 0.95,
             source: "test".to_string(),
         };

@@ -135,7 +135,7 @@ async fn test_all_samples_simple_deterministic_against_parsed_json() {
         };
 
         // Step 3: Run "simple" deterministic parsing
-        let actual_events = parse_events_internal(
+        let mut actual_events = parse_events_internal(
             None,
             effective_text,
             Some(reference_time.clone()),
@@ -145,6 +145,14 @@ async fn test_all_samples_simple_deterministic_against_parsed_json() {
             Some("simple"),
         )
         .await;
+
+        if !ocr_res.qr_codes.is_empty() {
+            for event in &mut actual_events {
+                if event.url.is_none() {
+                    event.url = Some(ocr_res.qr_codes[0].clone());
+                }
+            }
+        }
 
         if actual_events.len() != expected_events.len() {
             all_mismatches.push(SampleMismatch {
@@ -894,6 +902,65 @@ async fn test_extract_event_from_ride_for_life_sample_image() {
     assert!(event.description.is_some());
     let desc = event.description.as_deref().unwrap();
     assert!(desc.contains("RIDE") || desc.contains("RALLY") || desc.contains("EVERYONE"));
+    assert_eq!(event.recurrence_rule, None);
+}
+
+#[tokio::test]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+async fn test_extract_event_from_commons_sample_image() {
+    let sample = get_sample_path("commons.jpg");
+    assert!(sample.exists(), "Sample commons {:?} must exist", sample);
+
+    let ocr_res = ocr::extract_text_from_path(sample.to_str().unwrap())
+        .expect("Should run OCR on sample commons.jpg");
+    assert!(!ocr_res.text.is_empty(), "OCR text should not be empty");
+    assert_eq!(
+        ocr_res.qr_codes,
+        vec!["https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw".to_string()],
+        "QR code in commons.jpg must decode to Tufts Zoom webinar URL"
+    );
+
+    let mut event = parse_event_internal(
+        None,
+        &ocr_res.text,
+        Some("2026-09-06T12:00:00-04:00".to_string()),
+        Some(-240),
+        None,
+        None,
+        Some("simple"),
+    )
+    .await;
+
+    if event.url.is_none() && !ocr_res.qr_codes.is_empty() {
+        event.url = Some(ocr_res.qr_codes[0].clone());
+    }
+
+    assert!(
+        event.title.to_uppercase().contains("COMMONS") || event.title.to_uppercase().contains("AGROFORESTRY"),
+        "Title should contain 'CAMPUS AS COMMONS', got: {}",
+        event.title
+    );
+    assert_eq!(
+        event.start_time.as_deref(),
+        Some("2026-09-10T12:00:00-04:00"),
+        "Start time must match Thursday Sep 10 2026 at 12:00 PM EDT"
+    );
+    assert_eq!(
+        event.end_time.as_deref(),
+        Some("2026-09-10T13:00:00-04:00"),
+        "End time must match Thursday Sep 10 2026 at 1:00 PM EDT"
+    );
+    assert!(!event.is_all_day, "Event with 12-1PM hours is not all-day");
+    assert!(
+        event.location.is_some() && event.location.as_deref().unwrap().contains("Curtis Hall"),
+        "Location must contain Curtis Hall Multipurpose Room, got: {:?}",
+        event.location
+    );
+    assert_eq!(
+        event.url.as_deref(),
+        Some("https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw"),
+        "Event url must match the decoded QR code link"
+    );
     assert_eq!(event.recurrence_rule, None);
 }
 

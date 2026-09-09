@@ -42,6 +42,8 @@ pub struct EventDetails {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence_rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub confidence: f32,
     pub source: String,
 }
@@ -306,7 +308,10 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
     // 5. Description Extraction
     let description = extract_description(&lines, &title, location.as_deref());
 
-    // 6. Confidence calculation
+    // 6. URL Extraction
+    let url = extract_url(&lines, ocr_text);
+
+    // 7. Confidence calculation
     let mut confidence_score: f32 = 0.3;
     if !title.is_empty() && title != "Event" && title != "Untitled Event" {
         confidence_score += 0.25;
@@ -330,9 +335,34 @@ pub fn parse_single_event_deterministic(ocr_text: &str, context: &ReferenceConte
         location,
         description,
         recurrence_rule: single_recurrence_rule,
+        url,
         confidence,
         source: "deterministic".to_string(),
     }
+}
+
+/// Extracts a web link or URL from text or labeled lines
+fn extract_url(lines: &[&str], text: &str) -> Option<String> {
+    for line in lines {
+        let lower = line.to_lowercase();
+        if lower.starts_with("url:")
+            || lower.starts_with("link:")
+            || lower.starts_with("website:")
+            || lower.starts_with("zoom:")
+        {
+            if let Some(pos) = line.find(':') {
+                let candidate = line[pos + 1..].trim();
+                if candidate.starts_with("http://") || candidate.starts_with("https://") {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+    }
+    let re = ::regex::Regex::new(r#"(?i)\bhttps?://[^\s<>"{}|\\^`\[\]]+"#).ok()?;
+    if let Some(m) = re.find(text) {
+        return Some(m.as_str().to_string());
+    }
+    None
 }
 
 #[cfg(test)]

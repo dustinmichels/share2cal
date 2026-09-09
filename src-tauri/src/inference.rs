@@ -28,6 +28,8 @@ pub struct LlmEventOutput {
     pub description: Option<String>,
     #[serde(default)]
     pub recurrence_rule: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// Wrapper matching the root JSON object with an `events` array
@@ -46,6 +48,7 @@ impl LlmEventOutput {
             location: self.location,
             description: self.description,
             recurrence_rule: self.recurrence_rule,
+            url: self.url,
             confidence: 0.95,
             source: source_name.to_string(),
         }
@@ -386,7 +389,7 @@ fn extract_events_from_loose_llm_json(raw: &str) -> Vec<EventDetails> {
     let is_all_day_re = regex::Regex::new(r#""is_all_day"\s*:\s*(true|false)"#).unwrap();
     let location_re = regex::Regex::new(r#""location"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
     let recurrence_re = regex::Regex::new(r#""recurrence_rule"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
-
+    let url_re = regex::Regex::new(r#""url"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|null)"#).unwrap();
     for block in raw.split('{') {
         if let Some(t_cap) = title_re.captures(block) {
             let title = t_cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
@@ -399,7 +402,7 @@ fn extract_events_from_loose_llm_json(raw: &str) -> Vec<EventDetails> {
             let is_all_day = is_all_day_re.captures(block).map(|c| c.get(1).unwrap().as_str() == "true").unwrap_or(false);
             let location = location_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
             let recurrence_rule = recurrence_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-
+            let url = url_re.captures(block).and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
             let event = EventDetails {
                 title,
                 start_time,
@@ -408,6 +411,7 @@ fn extract_events_from_loose_llm_json(raw: &str) -> Vec<EventDetails> {
                 location,
                 description: None,
                 recurrence_rule,
+                url,
                 confidence: 0.95,
                 source: "llm".to_string(),
             };

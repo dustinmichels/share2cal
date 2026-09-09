@@ -435,6 +435,22 @@ function formatEventTiming(event: EventDetails): string {
             </svg>
             <span class="meta-text meta-desc-text">{{ event.description }}</span>
           </div>
+          <!-- URL row (if available) -->
+          <div v-if="event.url" class="meta-row meta-row-url">
+            <svg
+              class="meta-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="meta-text meta-url-text">{{ event.url }}</span>
+          </div>
         </div>
 
         <div class="preview-item-footer">
