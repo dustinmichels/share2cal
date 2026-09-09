@@ -23,22 +23,30 @@ static int perform_ocr_on_source(CGImageSourceRef imageSource, char **out_json, 
     }
 
     @autoreleasepool {
-        VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] init];
-        request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
-        request.usesLanguageCorrection = YES;
+        VNRecognizeTextRequest *textRequest = [[VNRecognizeTextRequest alloc] init];
+        textRequest.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        textRequest.usesLanguageCorrection = YES;
+
+        VNDetectBarcodesRequest *barcodeRequest = [[VNDetectBarcodesRequest alloc] init];
+        barcodeRequest.symbologies = @[VNBarcodeSymbologyQR];
 
         VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cgImage options:@{}];
         CGImageRelease(cgImage);
 
         NSError *requestError = nil;
-        BOOL success = [handler performRequests:@[request] error:&requestError];
+        BOOL success = [handler performRequests:@[textRequest, barcodeRequest] error:&requestError];
         if (!success || requestError) {
-            NSString *errDesc = requestError ? [requestError localizedDescription] : @"Vision text recognition request failed.";
-            if (out_error) *out_error = create_c_string(errDesc);
-            return -1;
+            // Fallback to text recognition alone if combined request fails
+            requestError = nil;
+            success = [handler performRequests:@[textRequest] error:&requestError];
+            if (!success || requestError) {
+                NSString *errDesc = requestError ? [requestError localizedDescription] : @"Vision text recognition request failed.";
+                if (out_error) *out_error = create_c_string(errDesc);
+                return -1;
+            }
         }
 
-        NSArray<VNRecognizedTextObservation *> *observations = request.results;
+        NSArray<VNRecognizedTextObservation *> *observations = textRequest.results;
         if (!observations) {
             observations = @[];
         }
@@ -70,9 +78,41 @@ static int perform_ocr_on_source(CGImageSourceRef imageSource, char **out_json, 
         }
 
         NSString *fullText = [textLines componentsJoinedByString:@"\n"];
+        NSArray<VNBarcodeObservation *> *barcodeObservations = barcodeRequest.results;
+        NSMutableArray<NSString *> *qrCodes = [NSMutableArray array];
+        NSMutableArray<NSDictionary *> *barcodesData = [NSMutableArray array];
+
+        if (barcodeObservations) {
+            for (VNBarcodeObservation *obs in barcodeObservations) {
+                NSString *payload = obs.payloadStringValue;
+                if (payload && payload.length > 0) {
+                    [qrCodes addObject:payload];
+
+                    CGRect box = obs.boundingBox;
+                    NSDictionary *boxDict = @{
+                        @"x": @(box.origin.x),
+                        @"y": @(box.origin.y),
+                        @"width": @(box.size.width),
+                        @"height": @(box.size.height)
+                    };
+
+                    NSMutableDictionary *barcodeDict = [NSMutableDictionary dictionaryWithDictionary:@{
+                        @"payload": payload,
+                        @"bounding_box": boxDict
+                    }];
+                    if (obs.symbology) {
+                        barcodeDict[@"symbology"] = obs.symbology;
+                    }
+                    [barcodesData addObject:barcodeDict];
+                }
+            }
+        }
+
         NSDictionary *resultDict = @{
             @"text": fullText,
-            @"lines": linesData
+            @"lines": linesData,
+            @"qr_codes": qrCodes,
+            @"barcodes": barcodesData
         };
 
         NSError *jsonError = nil;

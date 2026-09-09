@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import type { CalendarInfo } from "../services/calendar";
 import type { CalendarTarget } from "../services/settings";
 import {
@@ -20,11 +20,14 @@ const props = withDefaults(
     addedIndices?: Set<number>;
     availableCalendars?: CalendarInfo[];
     defaultTarget?: CalendarTarget;
+    hideHeader?: boolean;
   }>(),
   {
     defaultTarget: "native",
+    hideHeader: false,
   },
 );
+
 const emit = defineEmits<{
   (e: "editEvent", index: number): void;
   (e: "addToCalendar"): void;
@@ -56,7 +59,7 @@ const overallConfidence = computed(() => {
   return Math.round((sum / props.events.length) * 100);
 });
 
-const previewMode = ref<"week" | "details">("details");
+const previewMode = defineModel<"week" | "details">("previewMode", { default: "details" });
 
 const weekStartKey = computed(() => {
   const eventDateKeys = props.events
@@ -177,7 +180,7 @@ function formatEventTiming(event: EventDetails): string {
 <template>
   <div class="surface-card preview-section">
     <!-- Section Header -->
-    <div class="section-header">
+    <div v-if="!hideHeader" class="section-header">
       <div class="section-title-wrap">
         <div class="section-icon-badge">
           <svg
@@ -213,22 +216,22 @@ function formatEventTiming(event: EventDetails): string {
       </div>
 
       <div class="section-header-actions">
-        <div v-if="weekDays.length" class="preview-mode-toggle" aria-label="Preview mode">
-          <button
-            type="button"
-            class="preview-mode-button"
-            :class="{ active: previewMode === 'week' }"
-            @click="previewMode = 'week'"
-          >
-            Week
-          </button>
+        <div class="preview-mode-toggle" aria-label="Preview mode">
           <button
             type="button"
             class="preview-mode-button"
             :class="{ active: previewMode === 'details' }"
             @click="previewMode = 'details'"
           >
-            Details
+            Detail View
+          </button>
+          <button
+            type="button"
+            class="preview-mode-button"
+            :class="{ active: previewMode === 'week' }"
+            @click="previewMode = 'week'"
+          >
+            Calendar View
           </button>
         </div>
         <span class="badge-pill badge-pill-confidence">{{ overallConfidence }}% match</span>
@@ -237,15 +240,15 @@ function formatEventTiming(event: EventDetails): string {
 
     <!-- One-week calendar-style preview -->
     <div
-      v-if="previewMode === 'week' && weekDays.length"
+      v-if="previewMode === 'week'"
       class="week-preview-card"
       aria-label="One week calendar preview"
     >
       <div class="week-preview-heading">
         <div>
-          <h3 class="week-preview-title">Week Preview</h3>
+          <h3 class="week-preview-title">Calendar View</h3>
           <p class="week-preview-subtitle">
-            A lightweight calendar view of where the event dates land.
+            A calendar view of where the event dates land.
           </p>
         </div>
         <span class="badge-pill week-preview-count"
@@ -253,7 +256,7 @@ function formatEventTiming(event: EventDetails): string {
         >
       </div>
 
-      <div class="week-preview-grid" role="list">
+      <div v-if="weekDays.length" class="week-preview-grid" role="list">
         <section
           v-for="day in weekDays"
           :key="day.key"
@@ -288,6 +291,12 @@ function formatEventTiming(event: EventDetails): string {
             <span v-if="day.events.length === 0" class="week-empty-slot">No events</span>
           </div>
         </section>
+      </div>
+      <div v-else class="week-empty-notice">
+        <p class="week-empty-text">No scheduled dates found in event(s). Switch to Detail View to review dates.</p>
+        <button type="button" class="btn-touch btn-touch-outline btn-switch-details" @click="previewMode = 'details'">
+          Switch to Detail View
+        </button>
       </div>
 
       <p
@@ -796,6 +805,28 @@ function formatEventTiming(event: EventDetails): string {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.35rem;
+}
+
+.week-empty-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.week-empty-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.btn-switch-details {
+  width: auto;
+  min-height: 38px;
+  padding: 0.5rem 1rem;
+  font-size: 0.84rem;
 }
 
 .week-day-column {

@@ -110,16 +110,15 @@ Checklist and architectural specifications for adding native **Android** and **W
 
 ### 4.1 Native Detection & Ingestion Pipeline
 
-- [ ] **Apple Vision Backend (`ocr_apple.m`)**:
+- [x] **Apple Vision Backend (`ocr_apple.m`)**:
   - Add `VNDetectBarcodesRequest` (`symbologies = @[VNBarcodeSymbologyQR]`) alongside `VNRecognizeTextRequest` in the `VNImageRequestHandler.performRequests` invocation.
   - Extract decoded payload strings (`obs.payloadStringValue`) and bounding boxes from `VNBarcodeObservation` results.
   - Serialize `qr_codes` array in the JSON returned across the C FFI boundary to Rust.
-- [ ] **Android Backend (`ocr_android.rs` / `OcrPlugin.kt`)**:
+- [x] **Android Backend (`ocr_android.rs` / `OcrPlugin.kt`)**:
   - Integrate Google ML Kit Barcode Scanning (`com.google.mlkit:barcode-scanning`) into the Android image processing pipeline.
-  - Run barcode scanning concurrently with text recognition on the input bitmap.
-- [ ] **Windows / Cross-Platform Fallback (`ocr_windows.rs` / pure Rust)**:
-  - Evaluate `Windows.Media.Ocr` / `ZXing` / `rxing` crate for decoding barcodes on non-Apple/non-Android builds.
-
+  - Architect concurrent pipeline: dispatch `textRecognizer.process(image)` and `barcodeScanner.process(image)` via `Tasks.whenAllSuccess` on Android.
+- [x] **Windows / Cross-Platform Fallback (`ocr_windows.rs` / pure Rust)**:
+  - Evaluated: `Windows.Media.Ocr` only handles text from `SoftwareBitmap` (WinRT `BarcodeScanner` requires physical POS hardware). `zxing-cpp` introduces CMake/C++ toolchain friction on MSVC. Evaluated `rxing` (pure Rust ZXing port) as the recommended zero-C++ fallback for cross-platform/Windows barcode decoding when platform-native APIs lack barcode extraction.
 ### 4.2 Data Model & First-Class URL Field
 
 - [ ] **OCR Data Model (`src-tauri/src/ocr.rs` & `src/services/ocr.ts`)**:

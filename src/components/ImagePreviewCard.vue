@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Sparkles, LoaderCircle } from "lucide-vue-next";
+
 defineProps<{
   file: File;
   previewUrl: string | null;
@@ -77,31 +79,20 @@ function formatFileSize(bytes: number): string {
     <div class="scanner-action-wrap">
       <button
         type="button"
-        class="btn-touch btn-touch-scan"
+        class="btn-touch btn-touch-scan btn-touch-parse"
         :class="{ 'is-loading': isProcessing }"
         :disabled="isProcessing"
         @click="emit('scan')"
       >
         <template v-if="!isProcessing">
-          <svg
-            class="btn-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <span>Scan and extract</span>
+          <Sparkles class="btn-icon" :stroke-width="2.2" />
+          <span>Parse</span>
         </template>
         <template v-else>
-          <div class="spinner-circle"></div>
-          <span>Scanning and extracting...</span>
+          <LoaderCircle class="btn-icon spinner-icon animate-spin" :stroke-width="2.2" />
+          <span>Parsing...</span>
         </template>
       </button>
-
       <div class="quick-switch-bar">
         <button
           type="button"
@@ -259,5 +250,24 @@ function formatFileSize(bytes: number): string {
 
 .quick-dot {
   color: var(--text-tertiary);
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-touch-parse {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 </style>

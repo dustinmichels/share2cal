@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { Sparkles } from "lucide-vue-next";
 
 const props = defineProps<{
   isDragging?: boolean;
@@ -101,6 +102,19 @@ function handleDrop(event: DragEvent) {
       </button>
     </div>
 
+    <div class="upload-parse-wrap">
+      <button
+        type="button"
+        class="btn-touch btn-touch-parse is-disabled"
+        disabled
+        aria-disabled="true"
+        title="Upload a picture first to activate Parse"
+      >
+        <Sparkles class="btn-icon" :stroke-width="2.2" />
+        <span>Parse</span>
+      </button>
+      <p class="parse-hint">Upload a picture to activate parse</p>
+    </div>
     <div class="upload-footer">
       <p class="format-note">Supports PNG, JPG, HEIF, WebP • Drag & drop or paste via ⌘V</p>
     </div>
@@ -180,6 +194,40 @@ function handleDrop(event: DragEvent) {
 }
 
 .format-note {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.upload-parse-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.btn-touch-parse {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #0056b3 100%);
+  color: #ffffff;
+  box-shadow: var(--shadow-primary-btn);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.btn-touch-parse.is-disabled,
+.btn-touch-parse:disabled {
+  background: var(--bg-input);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-input);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.parse-hint {
   font-size: 0.8rem;
   color: var(--text-tertiary);
   margin: 0;

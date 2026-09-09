@@ -20,6 +20,8 @@ pub struct OcrLine {
 pub struct OcrResult {
     pub text: String,
     pub lines: Vec<OcrLine>,
+    #[serde(default)]
+    pub qr_codes: Vec<String>,
 }
 
 /// Reconstructs line text by clustering 2D bounding boxes into horizontal rows.
@@ -403,7 +405,13 @@ mod tests {
 
         let result = extract_text_from_path(sample.to_str().unwrap()).expect("OCR should succeed on commons.jpg");
         println!("--- Extracted OCR Text for commons.jpg ---\n{}\n---------------------------------------------", result.text);
+        println!("--- Extracted QR Codes for commons.jpg ---\n{:?}\n---------------------------------------------", result.qr_codes);
         assert!(!result.text.is_empty(), "Extracted text should not be empty");
+        assert_eq!(
+            result.qr_codes,
+            vec!["https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw"],
+            "QR code should be correctly decoded from commons.jpg"
+        );
     }
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -414,6 +422,21 @@ mod tests {
         let result = extract_text_from_bytes(&bytes).expect("OCR from bytes should succeed");
         assert!(!result.text.is_empty());
         assert!(result.text.contains("GILMAN SQUARE"));
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn test_ocr_qr_code_from_bytes() {
+        let sample = get_sample_path("commons.jpg");
+        let bytes = std::fs::read(&sample).expect("Should read commons.jpg sample file");
+
+        let result = extract_text_from_bytes(&bytes).expect("OCR from bytes should succeed on commons.jpg");
+        assert!(!result.text.is_empty(), "Extracted text should not be empty");
+        assert_eq!(
+            result.qr_codes,
+            vec!["https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw"],
+            "QR code should be correctly decoded from commons.jpg bytes"
+        );
     }
 
     #[test]

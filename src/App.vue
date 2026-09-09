@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
-import { ArrowLeft, LoaderCircle, Settings } from "lucide-vue-next";
+import { ArrowLeft, Settings } from "lucide-vue-next";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { extractTextFromBytes, type OcrResult } from "./services/ocr";
 import {
@@ -49,7 +49,11 @@ import EventFormCard from "./components/EventFormCard.vue";
 import OcrDrawer from "./components/OcrDrawer.vue";
 import ImageReferenceCard from "./components/ImageReferenceCard.vue";
 import SettingsView from "./components/SettingsView.vue";
+import MobileFloatingPanel from "./components/MobileFloatingPanel.vue";
+
 const currentView = ref<"main" | "summary" | "settings">("main");
+const previewMode = ref<"details" | "week">("details");
+const imageRefCard = ref<InstanceType<typeof ImageReferenceCard> | null>(null);
 const parsingMode = ref<ParsingMode>(getStoredParsingMode());
 
 function updateParsingMode(mode: ParsingMode) {
@@ -92,6 +96,12 @@ const eventsList = ref<EventDetails[]>([]);
 const selectedEventIndex = ref<number | null>(null);
 const addedEventIndices = ref<Set<number>>(new Set());
 
+
+const overallConfidence = computed(() => {
+  if (eventsList.value.length === 0) return 0;
+  const sum = eventsList.value.reduce((acc, curr) => acc + (curr.confidence || 0.8), 0);
+  return Math.round((sum / eventsList.value.length) * 100);
+});
 const shareNotification = ref<string | null>(null);
 const isFromShareExtension = ref(false);
 const copiedSummary = ref(false);
@@ -330,7 +340,6 @@ function handlePaste(event: ClipboardEvent) {
 async function handleGo() {
   if (!selectedFile.value) return;
 
-  currentView.value = "summary";
   errorMessage.value = null;
   isProcessing.value = true;
   calendarDownloaded.value = false;
@@ -348,18 +357,21 @@ async function handleGo() {
     if (!res.text.trim()) {
       errorMessage.value =
         "No text was detected in this image. Try another photo with clearer text.";
-    } else {
-      // Parse multiple or single event details from the extracted OCR text
-      const parsed = await parseEventsFromText(
-        res.text,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        parsingMode.value,
-      );
-      eventsList.value = parsed;
+      return;
     }
+
+    // Parse multiple or single event details from the extracted OCR text
+    const parsed = await parseEventsFromText(
+      res.text,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      parsingMode.value,
+    );
+    eventsList.value = parsed;
+    // Once parsing finishes, navigate to the next screen!
+    currentView.value = "summary";
   } catch (err: unknown) {
     errorMessage.value =
       err instanceof Error
@@ -369,7 +381,6 @@ async function handleGo() {
     isProcessing.value = false;
   }
 }
-
 async function handleReparse() {
   if (!ocrResult.value?.text) return;
   try {
@@ -941,45 +952,27 @@ onUnmounted(() => {
 
       <!-- VIEW 2: Event Summary -->
       <section v-else-if="currentView === 'summary'" class="summary-view-flow">
-        <div class="summary-nav">
-          <button
-            type="button"
-            class="btn-touch btn-touch-outline summary-back-button"
-            @click="currentView = 'main'"
+        <!-- MOBILE FLOW (< 900px): Persistent Image + Draggable Floating Bottom Panel -->
+        <div class="summary-mobile-wrapper">
+          <MobileFloatingPanel
+            v-model:view-mode="previewMode"
+            :preview-url="previewUrl"
+            :file-name="selectedFile?.name"
+            :total-events="eventsList.length"
+            :overall-confidence="overallConfidence"
+            :is-editing="selectedEventIndex !== null"
+            @back="currentView = 'main'"
+            @open-image-modal="imageRefCard?.openModal()"
           >
-            <ArrowLeft class="btn-icon" :stroke-width="2.2" />
-            <span>Back to image upload</span>
-          </button>
-        </div>
-
-        <div class="summary-layout-grid">
-          <!-- Side / Mobile Reference Image -->
-          <aside v-if="previewUrl" class="summary-image-column">
-            <ImageReferenceCard :file="selectedFile" :preview-url="previewUrl" />
-          </aside>
-
-          <!-- Extracted Event Cards & Detailed Editor -->
-          <div class="summary-content-column">
-            <section
-              v-if="isProcessing"
-              class="surface-card extraction-loading-card"
-              aria-live="polite"
-              aria-busy="true"
-            >
-              <LoaderCircle class="summary-loading-icon" :stroke-width="2" aria-hidden="true" />
-              <div class="loading-copy">
-                <h2 class="section-heading">Scanning and extracting</h2>
-                <p class="section-subheading">Reading the image and building your event summary.</p>
-              </div>
-            </section>
-
             <!-- PREVIEW VIEW: Event Summary / List of Events -->
             <EventPreviewCard
-              v-else-if="eventsList.length > 0 && selectedEventIndex === null"
+              v-if="eventsList.length > 0 && selectedEventIndex === null"
               v-model:selected-calendar-id="selectedCalendarId"
+              v-model:preview-mode="previewMode"
               :events="eventsList"
               :available-calendars="availableCalendars"
               :default-target="defaultCalendarTarget"
+              :hide-header="true"
               :is-adding-to-calendar="isAddingToCalendar"
               :copied-summary="copiedSummary"
               :added-indices="addedEventIndices"
@@ -1026,6 +1019,89 @@ onUnmounted(() => {
               :ocr-result="ocrResult"
               @reparse="handleReparse"
             />
+          </MobileFloatingPanel>
+        </div>
+
+        <!-- DESKTOP FLOW (>= 900px): Side-by-Side Grid Layout -->
+        <div class="summary-desktop-wrapper">
+          <div class="summary-nav">
+            <button
+              type="button"
+              class="btn-touch btn-touch-outline summary-back-button"
+              @click="currentView = 'main'"
+            >
+              <ArrowLeft class="btn-icon" :stroke-width="2.2" />
+              <span>Back to image upload</span>
+            </button>
+          </div>
+
+          <div class="summary-layout-grid">
+            <!-- Side Reference Image Column -->
+            <aside v-if="previewUrl" class="summary-image-column">
+              <ImageReferenceCard
+                ref="imageRefCard"
+                :file="selectedFile"
+                :preview-url="previewUrl"
+              />
+            </aside>
+
+            <!-- Extracted Event Cards & Detailed Editor -->
+            <div class="summary-content-column">
+              <!-- PREVIEW VIEW: Event Summary / List of Events -->
+              <EventPreviewCard
+                v-if="eventsList.length > 0 && selectedEventIndex === null"
+                v-model:selected-calendar-id="selectedCalendarId"
+                v-model:preview-mode="previewMode"
+                :events="eventsList"
+                :available-calendars="availableCalendars"
+                :default-target="defaultCalendarTarget"
+                :is-adding-to-calendar="isAddingToCalendar"
+                :copied-summary="copiedSummary"
+                :added-indices="addedEventIndices"
+                @edit-event="openEditScreen"
+                @add-to-calendar="handleBatchAddToCalendar"
+                @open-google-calendar="handleOpenGoogleCalendar"
+                @export-ics="handleExportIcs"
+                @copy-summary="copySummary"
+                @remove-event="handleRemoveEvent"
+              />
+
+              <!-- EDIT VIEW: Detailed Event Editing Screen -->
+              <EventFormCard
+                v-else-if="eventsList.length > 0 && selectedEventIndex !== null"
+                v-model="eventForm"
+                v-model:selected-calendar-id="selectedCalendarId"
+                :confidence="eventsList[selectedEventIndex]?.confidence ?? 0.8"
+                :available-calendars="availableCalendars"
+                :default-target="defaultCalendarTarget"
+                :is-adding-to-calendar="isAddingToCalendar"
+                :copied-summary="copiedSummary"
+                :current-index="selectedEventIndex"
+                :total-events="eventsList.length"
+                @back="closeEditScreen"
+                @add-to-calendar="handleSingleAddToCalendar"
+                @open-google-calendar="
+                  () => handleOpenGoogleCalendar(selectedEventIndex ?? undefined)
+                "
+                @export-ics="handleSingleExportIcs"
+                @copy-summary="copySingleSummary"
+                @remove="handleRemoveCurrentEvent"
+              />
+
+              <section v-else class="surface-card extraction-empty-card">
+                <h2 class="section-heading">No event summary yet</h2>
+                <p class="section-subheading">
+                  Go back to image upload and scan a clearer flyer or screenshot.
+                </p>
+              </section>
+
+              <!-- Collapsible Raw OCR Diagnostics Drawer -->
+              <OcrDrawer
+                v-if="!isProcessing && ocrResult"
+                :ocr-result="ocrResult"
+                @reparse="handleReparse"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -1150,7 +1226,49 @@ onUnmounted(() => {
   transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+@media (max-width: 899px) {
+  .app-container.is-summary-view {
+    max-width: 100%;
+    padding: 0;
+    gap: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .summary-desktop-wrapper {
+    display: none !important;
+  }
+
+  .summary-mobile-wrapper {
+    display: block;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .is-summary-view .toast-banner {
+    position: fixed;
+    top: max(3.8rem, calc(env(safe-area-inset-top) + 3.2rem));
+    left: 1rem;
+    right: 1rem;
+    z-index: 70;
+  }
+}
+
 @media (min-width: 900px) {
+  .summary-mobile-wrapper {
+    display: none !important;
+  }
+
+  .summary-desktop-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    width: 100%;
+  }
+
   .app-container.is-summary-view {
     max-width: 1060px;
   }

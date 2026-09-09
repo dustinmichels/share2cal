@@ -114,6 +114,11 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleKeydown);
   document.body.style.overflow = "";
 });
+
+defineExpose({
+  openModal,
+  closeModal,
+});
 </script>
 
 <template>
