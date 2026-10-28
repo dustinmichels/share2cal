@@ -497,17 +497,21 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
         location: "Park Trail",
         description: "Casual community walk",
         url: null,
-        confidence: 0.90,
+        confidence: 0.9,
         source: "ocr",
       };
 
       // Single event ICS
       const singleIcs = generateIcsCalendarContent(event1);
-      expect(singleIcs).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+      expect(singleIcs).toContain(
+        "URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw",
+      );
 
       // Batch / Multi-event ICS
       const batchIcs = generateMultiIcsCalendarContent([event1, event2, eventWithoutUrl]);
-      expect(batchIcs).toContain("URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw");
+      expect(batchIcs).toContain(
+        "URL:https://tufts.zoom.us/webinar/register/WN_trzRawg4RbKfQBvJ5ylTDw",
+      );
       expect(batchIcs).toContain("URL:https://example.com/tickets");
 
       // Verify VEVENT separation and count
@@ -535,14 +539,29 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
     });
 
     it("supports simple and enhanced parsing modes for progressive retry flow", async () => {
-      const sampleText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+      const sampleText =
+        "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
 
       // In browser/node test environment, verify parseEventsFromText returns events
-      const simpleEvents = await parseEventsFromText(sampleText, undefined, undefined, undefined, undefined, "simple");
+      const simpleEvents = await parseEventsFromText(
+        sampleText,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "simple",
+      );
       expect(simpleEvents.length).toBeGreaterThan(0);
       expect(simpleEvents[0].title).toBe("Weekly Pottery Class");
 
-      const enhancedEvents = await parseEventsFromText(sampleText, undefined, undefined, undefined, undefined, "enhanced");
+      const enhancedEvents = await parseEventsFromText(
+        sampleText,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "enhanced",
+      );
       expect(enhancedEvents.length).toBeGreaterThan(0);
       expect(enhancedEvents[0].title).toBe("Weekly Pottery Class");
     });
@@ -573,7 +592,8 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
     });
 
     it("supports parseEventsProgressive with onSimpleResult callback and enhanced completion", async () => {
-      const pastedEventText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+      const pastedEventText =
+        "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
 
       let simpleCallbackEvents: EventDetails[] | null = null;
       const result = await parseEventsProgressive(pastedEventText, {
@@ -596,7 +616,8 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
     });
 
     it("supports parseEventsProgressive with skipEnhanced: true", async () => {
-      const pastedEventText = "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
+      const pastedEventText =
+        "Weekly Pottery Class\nTuesdays & Thursdays 6:00 PM - 8:00 PM\nCommunity Arts Center";
 
       let simpleCallbackEvents: EventDetails[] | null = null;
       const result = await parseEventsProgressive(pastedEventText, {

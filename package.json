@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "test": "bun test ./tests",
     "fmt": "oxfmt",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "docs:dev": "bun run --cwd docs dev",
+    "docs:build": "bun run --cwd docs build",
+    "docs:preview": "bun run --cwd docs preview"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

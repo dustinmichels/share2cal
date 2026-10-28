@@ -2,6 +2,13 @@
 
 See [./requirements.md](./requirements.md).
 
+Developer docs live in [`docs/`](./docs) (VitePress). Preview them with:
+
+```sh
+cd docs && bun install && cd ..
+bun run docs:dev
+```
+
 ```sh
 bun install
 bun run tauri android init
@@ -75,7 +82,7 @@ To install and run the standalone production app directly on a connected iPhone:
 
 > **First-time iPhone setup**:
 >
-> - **Developer Mode**: On iOS 16+, enable via **Settings > Privacy & Security > Developer Mode** (requires device restart).
+> - **Developer Mode**: On iOS 16+, connect the phone to Xcode first (the toggle is hidden until then), enable **Settings > Privacy & Security > Developer Mode**, restart, then tap **Turn On** and enter your passcode. Full steps and troubleshooting: [docs/guide/iphone.md](docs/guide/iphone.md#enable-developer-mode).
 > - **Trust Developer**: If prompted with "Untrusted Developer", go to **Settings > General > VPN & Device Management**, tap your developer certificate, and tap **Trust**.
 
 ```sh

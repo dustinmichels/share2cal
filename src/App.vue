@@ -354,9 +354,7 @@ async function handlePaste(event: ClipboardEvent) {
   const target = event.target as HTMLElement | null;
   if (
     target &&
-    (target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable)
+    (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
   ) {
     return;
   }
@@ -383,7 +381,8 @@ async function handlePaste(event: ClipboardEvent) {
 
 async function processExtractedText(rawText: string, qrCodes?: string[]) {
   if (!rawText.trim() && (!qrCodes || qrCodes.length === 0)) {
-    errorMessage.value = "No event text was detected. Please try another photo or paste clearer text.";
+    errorMessage.value =
+      "No event text was detected. Please try another photo or paste clearer text.";
     return;
   }
 
@@ -401,7 +400,9 @@ async function processExtractedText(rawText: string, qrCodes?: string[]) {
   const hasQr = combinedQrs.length > 0;
   const qrSection = hasQr ? `Links / QR Codes:\n${combinedQrs.join("\n")}` : "";
   const textToParse = hasText
-    ? (hasQr ? `${rawText.trim()}\n\n${qrSection}` : rawText.trim())
+    ? hasQr
+      ? `${rawText.trim()}\n\n${qrSection}`
+      : rawText.trim()
     : `Event\n${qrSection}`;
 
   // 1. Simple parsing: immediate, fast rule-based extraction
@@ -553,7 +554,9 @@ async function handleTryAgain() {
   const hasQr = qrCodes.length > 0;
   const qrSection = hasQr ? `Links / QR Codes:\n${qrCodes.join("\n")}` : "";
   const textToParse = hasText
-    ? (hasQr ? `${rawText}\n\n${qrSection}` : rawText)
+    ? hasQr
+      ? `${rawText}\n\n${qrSection}`
+      : rawText
     : `Event\n${qrSection}`;
 
   isReparsingWithLlm.value = true;
@@ -1250,7 +1253,8 @@ onUnmounted(() => {
             <section v-else class="surface-card extraction-empty-card">
               <h2 class="section-heading">No event summary yet</h2>
               <p class="section-subheading">
-                Simple parsing did not detect events. Try again with the AI model, or scan a clearer flyer.
+                Simple parsing did not detect events. Try again with the AI model, or scan a clearer
+                flyer.
               </p>
               <div class="empty-card-actions">
                 <button
@@ -1376,7 +1380,8 @@ onUnmounted(() => {
               <section v-else class="surface-card extraction-empty-card">
                 <h2 class="section-heading">No event summary yet</h2>
                 <p class="section-subheading">
-                  Simple parsing did not detect events. Try again with the AI model, or scan a clearer flyer.
+                  Simple parsing did not detect events. Try again with the AI model, or scan a
+                  clearer flyer.
                 </p>
                 <div class="empty-card-actions">
                   <button

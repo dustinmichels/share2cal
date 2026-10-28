@@ -1,0 +1,253 @@
+/*
+ * Share2Cal docs theme.
+ * Palette borrows the app icon's blue and pairs it with the fluorescent pink
+ * used for OCR bounding boxes, printed on cool paper.
+ */
+
+:root {
+  --s2c-paper: #f4f6fa;
+  --s2c-paper-raised: #ffffff;
+  --s2c-ink: #13203a;
+  --s2c-ink-soft: #46536b;
+  --s2c-ink-faint: #7c879b;
+  --s2c-blue: #0a6cc4;
+  --s2c-blue-deep: #08549a;
+  --s2c-indigo: #5856d6;
+  --s2c-pink: #e62e8c;
+  --s2c-pink-wash: rgba(230, 46, 140, 0.1);
+  --s2c-rule: #d9dfe9;
+  --s2c-display: "Bricolage Grotesque Variable", "Instrument Sans Variable", system-ui, sans-serif;
+
+  --vp-font-family-base:
+    "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --vp-font-family-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --vp-c-bg: var(--s2c-paper);
+  --vp-c-bg-alt: #e9edf4;
+  --vp-c-bg-elv: var(--s2c-paper-raised);
+  --vp-c-bg-soft: #e9edf4;
+
+  --vp-c-text-1: var(--s2c-ink);
+  --vp-c-text-2: var(--s2c-ink-soft);
+  --vp-c-text-3: var(--s2c-ink-faint);
+
+  --vp-c-divider: var(--s2c-rule);
+  --vp-c-gutter: var(--s2c-rule);
+  --vp-c-border: #c6cfdd;
+
+  --vp-c-brand-1: var(--s2c-blue);
+  --vp-c-brand-2: var(--s2c-blue-deep);
+  --vp-c-brand-3: var(--s2c-blue);
+  --vp-c-brand-soft: rgba(10, 108, 196, 0.12);
+
+  --vp-c-tip-1: var(--s2c-blue);
+  --vp-c-tip-2: var(--s2c-blue-deep);
+  --vp-c-tip-3: var(--s2c-blue);
+  --vp-c-tip-soft: rgba(10, 108, 196, 0.08);
+
+  --vp-c-warning-soft: rgba(212, 140, 10, 0.1);
+  --vp-c-danger-soft: rgba(214, 48, 64, 0.08);
+
+  --vp-code-bg: rgba(19, 32, 58, 0.06);
+  --vp-code-color: #1e3a66;
+  --vp-code-block-bg: #ffffff;
+
+  --vp-button-brand-bg: var(--s2c-blue);
+  --vp-button-brand-hover-bg: var(--s2c-blue-deep);
+  --vp-button-brand-active-bg: var(--s2c-blue-deep);
+
+  --vp-home-hero-name-color: var(--s2c-ink);
+  --vp-local-search-highlight-bg: var(--s2c-pink-wash);
+  --vp-local-search-highlight-text: var(--s2c-ink);
+}
+
+.dark {
+  --s2c-paper: #0d1424;
+  --s2c-paper-raised: #141e33;
+  --s2c-ink: #e3e9f4;
+  --s2c-ink-soft: #a9b4c8;
+  --s2c-ink-faint: #75819a;
+  --s2c-blue: #5ab0ff;
+  --s2c-blue-deep: #8cc8ff;
+  --s2c-indigo: #9896ff;
+  --s2c-pink: #ff6cb8;
+  --s2c-pink-wash: rgba(255, 108, 184, 0.14);
+  --s2c-rule: #22304a;
+
+  --vp-c-bg-alt: #0a101d;
+  --vp-c-bg-soft: #18233a;
+  --vp-c-border: #2c3b58;
+  --vp-c-brand-soft: rgba(90, 176, 255, 0.14);
+  --vp-c-tip-soft: rgba(90, 176, 255, 0.1);
+  --vp-code-bg: rgba(140, 170, 220, 0.1);
+  --vp-code-color: #bcd8ff;
+  --vp-code-block-bg: #111a2c;
+  --vp-button-brand-text: #0d1424;
+  --vp-button-brand-hover-text: #0d1424;
+  --vp-button-brand-active-text: #0d1424;
+}
+
+/* ---------- Typography ---------- */
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPNavBarTitle .title {
+  font-family: var(--s2c-display);
+  font-optical-sizing: auto;
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h1 {
+  font-size: 2.6rem;
+  line-height: 1.08;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  font-stretch: 92%;
+  margin-bottom: 0.4em;
+}
+
+.vp-doc h2 {
+  font-size: 1.6rem;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+  border-top: 0;
+  margin-top: 2.6em;
+  padding-top: 0;
+}
+
+.vp-doc h3 {
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+}
+
+.vp-doc p,
+.vp-doc li {
+  line-height: 1.7;
+}
+
+.vp-doc > div > p,
+.vp-doc > div > ul,
+.vp-doc > div > ol {
+  max-width: 68ch;
+}
+
+/* The lede right under a page title */
+.vp-doc h1 + p {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  max-width: 60ch;
+}
+
+.vp-doc a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--vp-c-brand-1) 45%, transparent);
+  transition: text-decoration-color 0.15s;
+}
+
+.vp-doc a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* OCR-style highlight for <mark>: a bounding box, not a marker stroke */
+.vp-doc mark {
+  background: var(--s2c-pink-wash);
+  color: inherit;
+  outline: 1.5px solid var(--s2c-pink);
+  outline-offset: 1px;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.vp-doc table {
+  font-size: 0.92em;
+}
+
+.vp-doc th {
+  font-weight: 650;
+  background: transparent;
+  border-bottom: 2px solid var(--vp-c-border);
+}
+
+.vp-doc tr:nth-child(2n) {
+  background: transparent;
+}
+
+.vp-doc td code {
+  white-space: nowrap;
+}
+
+.vp-doc div[class*="language-"] {
+  border: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc .custom-block {
+  border-radius: 6px;
+}
+
+.vp-doc .custom-block.tip {
+  border-left: 3px solid var(--s2c-blue);
+}
+
+.vp-doc .custom-block.warning {
+  border-left: 3px solid #d48c0a;
+}
+
+.vp-doc .custom-block.danger {
+  border-left: 3px solid #d63040;
+}
+
+.vp-doc .custom-block-title {
+  font-family: var(--s2c-display);
+  font-weight: 650;
+}
+
+:focus-visible {
+  outline: 2px solid var(--s2c-pink);
+  outline-offset: 2px;
+}
+
+/* ---------- Home page ---------- */
+
+.s2c-home {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+}
+
+@media (min-width: 768px) {
+  .s2c-home {
+    padding: 0 48px 120px;
+  }
+}
+
+/* Shared tokens for diagram components */
+.s2c-figure {
+  margin: 28px 0 32px;
+}
+
+.s2c-figure figcaption {
+  margin-top: 12px;
+  font-size: 0.86rem;
+  color: var(--vp-c-text-3);
+  max-width: 68ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

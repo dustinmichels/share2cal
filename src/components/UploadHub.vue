@@ -145,7 +145,11 @@ async function handleDrop(event: DragEvent) {
         </svg>
         <span>Take Photo</span>
       </button>
-      <button type="button" class="btn-touch btn-touch-secondary btn-paste-text" @click="handlePasteTextClick">
+      <button
+        type="button"
+        class="btn-touch btn-touch-secondary btn-paste-text"
+        @click="handlePasteTextClick"
+      >
         <ClipboardPaste class="btn-icon" :stroke-width="2.2" />
         <span>Paste Text</span>
       </button>
@@ -164,71 +168,75 @@ async function handleDrop(event: DragEvent) {
       <p class="parse-hint">Upload a picture to activate parse</p>
     </div>
     <div class="upload-footer">
-      <p class="format-note">Supports PNG, JPG, HEIF, WebP, or paste text • Drag & drop or paste via ⌘V</p>
+      <p class="format-note">
+        Supports PNG, JPG, HEIF, WebP, or paste text • Drag & drop or paste via ⌘V
+      </p>
     </div>
   </section>
 
-    <!-- Modal Dialog for Pasting / Typing Text -->
-    <Teleport to="body">
-      <div
-        v-if="showTextModal"
-        class="paste-text-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Paste Event Text"
-        @keydown.esc="showTextModal = false"
-      >
-        <div class="paste-text-backdrop" @click="showTextModal = false"></div>
-        <div class="paste-text-dialog">
-          <div class="paste-text-header">
-            <div class="paste-text-header-title">
-              <ClipboardPaste class="dialog-icon" :stroke-width="2.2" />
-              <div>
-                <h3 class="dialog-title">Paste Event Text</h3>
-                <span class="dialog-subtitle">Paste any invitation, email, flyer details, or notes</span>
-              </div>
+  <!-- Modal Dialog for Pasting / Typing Text -->
+  <Teleport to="body">
+    <div
+      v-if="showTextModal"
+      class="paste-text-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Paste Event Text"
+      @keydown.esc="showTextModal = false"
+    >
+      <div class="paste-text-backdrop" @click="showTextModal = false"></div>
+      <div class="paste-text-dialog">
+        <div class="paste-text-header">
+          <div class="paste-text-header-title">
+            <ClipboardPaste class="dialog-icon" :stroke-width="2.2" />
+            <div>
+              <h3 class="dialog-title">Paste Event Text</h3>
+              <span class="dialog-subtitle"
+                >Paste any invitation, email, flyer details, or notes</span
+              >
             </div>
-            <button
-              type="button"
-              class="dialog-close-btn"
-              aria-label="Close"
-              @click="showTextModal = false"
-            >
-              <X class="btn-icon-sm" :stroke-width="2.2" />
-            </button>
           </div>
-          <div class="paste-text-body">
-            <textarea
-              v-model="manualText"
-              class="paste-textarea"
-              placeholder="Paste or type event text here...&#10;e.g. Pottery Class&#10;Tuesdays & Thursdays 6:00 PM - 8:00 PM&#10;Community Arts Center&#10;https://arts.example.org"
-              rows="6"
-              autofocus
-              @keydown.meta.enter="submitManualText"
-              @keydown.ctrl.enter="submitManualText"
-            ></textarea>
-          </div>
-          <div class="paste-text-footer">
-            <button
-              type="button"
-              class="btn-touch btn-touch-secondary btn-cancel"
-              @click="showTextModal = false"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="btn-touch btn-touch-primary btn-submit"
-              :disabled="!manualText.trim()"
-              @click="submitManualText"
-            >
-              <Sparkles class="btn-icon" :stroke-width="2.2" />
-              <span>Parse Event</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            class="dialog-close-btn"
+            aria-label="Close"
+            @click="showTextModal = false"
+          >
+            <X class="btn-icon-sm" :stroke-width="2.2" />
+          </button>
+        </div>
+        <div class="paste-text-body">
+          <textarea
+            v-model="manualText"
+            class="paste-textarea"
+            placeholder="Paste or type event text here...&#10;e.g. Pottery Class&#10;Tuesdays & Thursdays 6:00 PM - 8:00 PM&#10;Community Arts Center&#10;https://arts.example.org"
+            rows="6"
+            autofocus
+            @keydown.meta.enter="submitManualText"
+            @keydown.ctrl.enter="submitManualText"
+          ></textarea>
+        </div>
+        <div class="paste-text-footer">
+          <button
+            type="button"
+            class="btn-touch btn-touch-secondary btn-cancel"
+            @click="showTextModal = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn-touch btn-touch-primary btn-submit"
+            :disabled="!manualText.trim()"
+            @click="submitManualText"
+          >
+            <Sparkles class="btn-icon" :stroke-width="2.2" />
+            <span>Parse Event</span>
+          </button>
         </div>
       </div>
-    </Teleport>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
