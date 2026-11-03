@@ -146,6 +146,7 @@ pub fn open_models_directory(app: &AppHandle) -> Result<(), AppError> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
+        let _ = storage_dir;
         Err(AppError::Io("Opening directory browser is not supported on mobile operating systems due to application sandboxing.".to_string()))
     }
 }

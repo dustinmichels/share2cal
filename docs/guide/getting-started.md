@@ -82,6 +82,7 @@ To install a build that runs without your Mac, see [Running on iPhone](/guide/ip
 | `bun test`                        | Frontend tests in `tests/`                                        |
 | `cargo test` (in `src-tauri/`)    | Rust unit and integration tests                                   |
 | `bun run fmt`                     | Format with `oxfmt`                                               |
+| `bun run update`                  | JS + Rust deps, no major bumps; also rewrites package.json ranges |
 | `bun tauri icon path/to/icon.svg` | Regenerate every app icon size                                    |
 | `bun run docs:dev`                | This documentation site (run `bun install` in `docs/` once first) |
 

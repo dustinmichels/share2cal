@@ -6,7 +6,6 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};
@@ -186,9 +185,8 @@ pub fn run_inference_sync(
     tracing::debug!("Sampler initialized before prompt decoding");
 
     // Tokenize prompt
-    let tokens = model
-        .str_to_token(prompt, AddBos::Always)
-        .map_err(|e| AppError::Inference(format!("Failed to tokenize prompt: {}", e)))?;
+    let vocab = model.vocab();
+    let tokens = vocab.tokenize(prompt.as_bytes(), true, true);
 
     if tokens.is_empty() {
         return Err(AppError::Inference("Prompt resulted in zero tokens".to_string()));
@@ -243,15 +241,17 @@ pub fn run_inference_sync(
         }
 
         // Check for EOS / EOG token
-        if model.is_eog_token(token) {
+        if vocab.is_eog(token) {
             break;
         }
 
         // Decode token to string piece
-        let piece = model
-            .token_to_piece(token, &mut decoder, false, None)
-            .map_err(|e| AppError::Inference(format!("Failed to decode token to string piece: {}", e)))?;
-        generated_text.push_str(&piece);
+        let piece = vocab.token_to_piece(token, false, None);
+        let max_len = decoder.max_utf8_buffer_length(piece.len()).ok_or_else(|| {
+            AppError::Inference("Token piece too large to decode".to_string())
+        })?;
+        generated_text.reserve(max_len);
+        let _ = decoder.decode_to_string(&piece, &mut generated_text, false);
 
         // If closing JSON brace is reached and JSON parses, stop early
         let candidate_json = if !generated_text.trim_start().starts_with('{') {
