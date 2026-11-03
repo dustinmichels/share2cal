@@ -148,8 +148,9 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
   const instagramEntries = samplesManifest["samples/instagram.png"];
   const rideForLifeEntries = samplesManifest["samples/ride_for_life.png"];
   const squirrelFlowerEntries = samplesManifest["samples/squirrel_flower.jpg"];
+  const streetsForPeopleEntries = samplesManifest["samples/streets_for_people.jpg"];
 
-  it("loads all 7 sample image ground truths from samples/parsed.json", () => {
+  it("loads all 8 sample image ground truths from samples/parsed.json", () => {
     expect(classEntries.length).toBe(1);
     expect(classesEntries.length).toBe(6);
     expect(commonsEntries.length).toBe(1);
@@ -157,6 +158,7 @@ describe("Event Service & Multi-Method ICS Generation (using samples/parsed.json
     expect(instagramEntries.length).toBe(1);
     expect(rideForLifeEntries.length).toBe(1);
     expect(squirrelFlowerEntries.length).toBe(1);
+    expect(streetsForPeopleEntries.length).toBe(3);
   });
   describe("Multi-Event & Single-Event ICS Generation from parsed.json", () => {
     it("generates a multi-event RFC 5545 iCalendar (.ics) string for classes.png with 6 distinct VEVENT blocks", () => {

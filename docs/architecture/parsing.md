@@ -25,13 +25,14 @@ If the caller passes neither, `ReferenceContext::now()` uses the device's local 
 
 ## Strategy order
 
-`parse_events_deterministic` tries three strategies and returns the first that produces enough events:
+`parse_events_deterministic` tries four strategies and returns the first that produces enough events:
 
 | Order | Strategy                       | Accepts when     | `source`                                                      |
 | ----- | ------------------------------ | ---------------- | ------------------------------------------------------------- |
 | 1     | Schedule table (`schedule.rs`) | 2 or more events | `deterministic_schedule` or `deterministic_schedule_columnar` |
-| 2     | Agenda (`agenda.rs`)           | 2 or more events | `deterministic_agenda`                                        |
-| 3     | Single event (`mod.rs`)        | Always           | `deterministic`                                               |
+| 2     | Series (`series.rs`)           | 2 or more events | `deterministic_series`                                        |
+| 3     | Agenda (`agenda.rs`)           | 2 or more events | `deterministic_agenda`                                        |
+| 4     | Single event (`mod.rs`)        | Always           | `deterministic`                                               |
 
 A URL found anywhere in the document (`extract_url`) is copied onto every event that does not have one.
 
@@ -46,6 +47,22 @@ Each class becomes a weekly recurring event, starting on the first matching week
 
 This is also the check that decides whether the OCR commands use the [spatially rebuilt rows](/architecture/ocr#rebuilding-rows).
 
+### Series flyers
+
+For posters that list several separate events, each in its own block, such as `samples/streets_for_people.jpg`:
+
+```text
+PED 101          title: 1-3 heading lines
+Oct 26 (Mon)     anchor: a line that is only a date
+Noon-1pm         optional time line
+Gund 109         optional venue line
+The presentation description, up to the next block's title
+```
+
+Every line that is only a date (`Oct 26 (Mon)`, `Thursday, November 5`) anchors a block. The title is the short heading lines directly above it; single words above the first title line are treated as logo fragments and skipped. Single-word lines in the body (logos again) and link lines are left out of the description. Blocks without a time are all-day.
+
+The parser gives up, so later strategies run, when fewer than two anchors exist, when any anchor has no heading above it (a second date in body text), when a heading is a date label (`Rain Date`), or when a block has more than one line opening with a time range (that is an agenda).
+
 ### Agendas
 
 For programmes and line-ups where each line carries its own time range (`7:00 PM - 8:30 PM Opening talk`). The parser walks the lines, tracks the most recent date heading, and emits an event per time range. A line without its own date but with a day name (`Wed 6-8pm`) lands on the first matching weekday on or after the reference date.
@@ -57,7 +74,7 @@ The fallback, and the path most flyers take. It extracts each field independentl
 | Field       | How                                                                                                                                                                                                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Date        | Month-day, day-month, numeric and relative forms (`Nov 12`, `12th of November`, `11/12`, `2026-11-12`, `tomorrow`, `next Friday`). A weekday next to the date picks the year whose calendar matches; otherwise a date more than 60 days in the past rolls to next year.                        |
-| Time        | Ranges in 12- or 24-hour form (`6-8pm`, `6:00 PM – 8:00 PM`, `18:00-20:00`) or a single time (`at 7pm`, `doors 7:30 PM`). An end time earlier than the start rolls to the next day. No end time means one hour.                                                                                |
+| Time        | Ranges in 12- or 24-hour form (`6-8pm`, `6:00 PM – 8:00 PM`, `18:00-20:00`, `Noon-1pm`, `10pm-midnight`) or a single time (`at 7pm`, `doors 7:30 PM`). An end time earlier than the start rolls to the next day. No end time means one hour.                                                   |
 | All day     | A date with no time.                                                                                                                                                                                                                                                                           |
 | Recurrence  | A day pattern on a time line, near words like `every`, `weekly`, `schedule`, or two or more days (`Tu, Th`) produces `FREQ=WEEKLY;BYDAY=…`. Ambiguous short tokens such as `We` inside a long sentence are ignored.                                                                            |
 | Title       | Scores the first 12 lines. Earlier lines score higher; event words (`CONCERT`, `WORKSHOP`, `MARKET`, `RIDE`, …) add points; dates, times, URLs, phone numbers, bullets and metadata are skipped. Openers like `WITH` or `FEATURING` are recognised so a support act does not become the title. |
@@ -73,6 +90,7 @@ Confidence starts at 0.30 and adds 0.25 for a real title, 0.25 for a start time,
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `parser/mod.rs`        | `EventDetails`, `ReferenceContext`, strategy order, single-event parser, URL extraction |
 | `parser/schedule.rs`   | Row and columnar schedule-table parsers, course name cleanup                            |
+| `parser/series.rs`     | Series-flyer parser: one event per dated block                                          |
 | `parser/agenda.rs`     | Multi-line agenda parser                                                                |
 | `parser/heuristics.rs` | Title, location and description scoring, noise filters                                  |
 | `parser/datetime.rs`   | Date and time extraction, year resolution, weekday lookup                               |

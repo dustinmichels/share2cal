@@ -110,3 +110,34 @@
 - **Location:** Crystal Ballroom, Somerville, MA
 - **Details:** Squirrel Flower 2026 Tour with supporting artist youbet.
 - **Repeating:** false
+
+---
+
+## samples/streets_for_people.jpg
+
+Series flyer ("Streets for People", GSD Mobility) with three separate events.
+
+### Event 1
+
+- **Title:** PED 101
+- **Date/Time:** Monday, October 26, 2026, 12:00 PM – 1:00 PM
+- **Location:** Gund 109
+- **Details:** The presentation is a primer on aspects of the built environment (i.e., the streets and sidewalks) that go into creating safe, walkable places. Brendan Kearney is the Executive Director of WalkMassachusetts, a local nonprofit dedicated to making walking safer and easier. He will share examples of the organization's recent work, from analyzing crash reports to leading walk audits.
+- **Repeating:** false
+
+### Event 2
+
+- **Title:** INMAN SQUARE WALKING TOUR
+- **Date/Time:** Thursday, November 5, 2026, 4:00 PM – 5:00 PM
+- **Location:** Inman Square
+- **Details:** Join us for a walking tour of the recently redesigned Inman Square area! Toole Design staff will walk us through the design process and lessons learned, including a post-implementation study that is currently underway. We will also discuss design projects along nearby Hampshire Street and Cambridge Street. Event is followed by an informal social. Sign up REQUIRED.
+- **URL:** https://partiful.com/e/WYOOJ4vsEkMDMzbYl3OB (QR code)
+- **Repeating:** false
+
+### Event 3
+
+- **Title:** IN THE FACE OF BIKELASH
+- **Date/Time:** Monday, November 16, 2026, 12:00 PM – 1:00 PM
+- **Location:** Gund 109
+- **Details:** How do cities deliver ambitious bike infrastructure when projects face political resistance? Through two short presentations followed by open discussion, they'll explore the politics, challenges, and strategies behind delivering street changes in the face of "bikelash." Presented by Loeb Fellows: Becky Katz, Director of Maintenance and Delivery Services at the City of Toronto, and Julia Campbell, former Deputy Chief of Streets for Infrastructure and Design at the City of Boston.
+- **Repeating:** false

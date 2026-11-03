@@ -4,17 +4,18 @@ Two suites share one set of real flyers. Rust tests cover OCR, parsing, the mode
 
 ## Ground truth
 
-`samples/` holds seven real images, and `samples/parsed.json` lists the events a person would expect from each.
+`samples/` holds eight real images, and `samples/parsed.json` lists the events a person would expect from each.
 
-| Image                 | What it is                             | Expected events |
-| --------------------- | -------------------------------------- | --------------- |
-| `class.png`           | One course from a registration page    | 1, weekly       |
-| `classes.png`         | Registration schedule table            | 6, weekly       |
-| `commons.jpg`         | Campus talk flyer                      | 1               |
-| `gilman_flyer.png`    | Street festival poster, phone photo    | 1               |
-| `instagram.png`       | Instagram post for an ice cream social | 1               |
-| `ride_for_life.png`   | Bike ride poster, phone photo          | 1               |
-| `squirrel_flower.jpg` | Concert poster with a support act      | 1               |
+| Image                    | What it is                             | Expected events |
+| ------------------------ | -------------------------------------- | --------------- |
+| `class.png`              | One course from a registration page    | 1, weekly       |
+| `classes.png`            | Registration schedule table            | 6, weekly       |
+| `commons.jpg`            | Campus talk flyer                      | 1               |
+| `gilman_flyer.png`       | Street festival poster, phone photo    | 1               |
+| `instagram.png`          | Instagram post for an ice cream social | 1               |
+| `ride_for_life.png`      | Bike ride poster, phone photo          | 1               |
+| `squirrel_flower.jpg`    | Concert poster with a support act      | 1               |
+| `streets_for_people.jpg` | Talk series flyer, one block per event | 3               |
 
 Each expected event records `title`, `date` or `days`, `start_time` and `end_time` as wall-clock strings (`"1:20 PM"`), `is_all_day`, `repeating`, `location`, `description` and `url`. `parsed.md` is the same data in readable form.
 
@@ -27,12 +28,12 @@ cd src-tauri
 cargo test
 ```
 
-| Location                         | Covers                                                                                                                                                                          |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `#[cfg(test)]` modules in `src/` | Date, time and recurrence parsing; title, location and schedule heuristics; spatial row rebuilding; prompt budget and grammar; LLM JSON repair; epoch conversion; share staging |
-| `tests/samples_validation.rs`    | OCRs every sample and checks the rule-based parser against `parsed.json`; checks every prompt fits the context budget; multi-event extraction from `classes.png` and the flyers |
-| `tests/calendar_integration.rs`  | Permission commands, empty-title and bad-RRULE rejection, batch prevalidation, URL preservation, and that the mock is active so no real calendar is touched                     |
-| `tests/share_integration.rs`     | Stage, read and clear a pending share; reject empty bytes; load from a path                                                                                                     |
+| Location                         | Covers                                                                                                                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `#[cfg(test)]` modules in `src/` | Date, time and recurrence parsing; title, location and schedule heuristics; spatial row rebuilding; prompt budget and grammar; LLM JSON repair; epoch conversion; share staging                           |
+| `tests/samples_validation.rs`    | OCRs every sample and checks the rule-based parser against `parsed.json`; checks every prompt fits the context budget; multi-event extraction from `classes.png`, `streets_for_people.jpg` and the flyers |
+| `tests/calendar_integration.rs`  | Permission commands, empty-title and bad-RRULE rejection, batch prevalidation, URL preservation, and that the mock is active so no real calendar is touched                                               |
+| `tests/share_integration.rs`     | Stage, read and clear a pending share; reject empty bytes; load from a path                                                                                                                               |
 
 Most sample tests are `#[cfg(any(target_os = "macos", target_os = "ios"))]` because they need Vision. On other hosts they are compiled out.
 

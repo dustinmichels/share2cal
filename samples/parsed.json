@@ -156,5 +156,43 @@
       "description": "Squirrel Flower 2026 Tour with supporting artist youbet.",
       "url": null
     }
+  ],
+  "samples/streets_for_people.jpg": [
+    {
+      "title": "PED 101",
+      "date": "2026-10-26",
+      "days": null,
+      "start_time": "12:00 PM",
+      "end_time": "1:00 PM",
+      "is_all_day": false,
+      "repeating": false,
+      "location": "Gund 109",
+      "description": "The presentation is a primer on aspects of the built environment (i.e., the streets and sidewalks) that go into creating safe, walkable places. Brendan Kearney is the Executive Director of WalkMassachusetts, a local nonprofit dedicated to making walking safer and easier. He will share examples of the organization's recent work, from analyzing crash reports to leading walk audits.",
+      "url": null
+    },
+    {
+      "title": "INMAN SQUARE WALKING TOUR",
+      "date": "2026-11-05",
+      "days": null,
+      "start_time": "4:00 PM",
+      "end_time": "5:00 PM",
+      "is_all_day": false,
+      "repeating": false,
+      "location": "Inman Square",
+      "description": "Join us for a walking tour of the recently redesigned Inman Square area! Toole Design staff will walk us through the design process and lessons learned, including a post-implementation study that is currently underway. We will also discuss design projects along nearby Hampshire Street and Cambridge Street. Event is followed by an informal social. Sign up REQUIRED.",
+      "url": "https://partiful.com/e/WYOOJ4vsEkMDMzbYl3OB"
+    },
+    {
+      "title": "IN THE FACE OF BIKELASH",
+      "date": "2026-11-16",
+      "days": null,
+      "start_time": "12:00 PM",
+      "end_time": "1:00 PM",
+      "is_all_day": false,
+      "repeating": false,
+      "location": "Gund 109",
+      "description": "How do cities deliver ambitious bike infrastructure when projects face political resistance? Through two short presentations followed by open discussion, they'll explore the politics, challenges, and strategies behind delivering street changes in the face of \"bikelash.\" Presented by Loeb Fellows: Becky Katz, Director of Maintenance and Delivery Services at the City of Toronto, and Julia Campbell, former Deputy Chief of Streets for Infrastructure and Design at the City of Boston.",
+      "url": null
+    }
   ]
 }

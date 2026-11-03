@@ -63,6 +63,25 @@ pub(crate) static TIME_24H_RANGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(\d{1,2}):(\d{2})\s*(?:-|–|—|to)\s*(\d{1,2}):(\d{2})\b").unwrap()
 });
 
+/// "noon" / "midnight" written as a range endpoint ("Noon-1pm", "10pm-midnight")
+pub(crate) static NOON_MIDNIGHT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(noon|midnight)\b").unwrap());
+
+/// A line that is only a date, optionally with a weekday before it or in parentheses after it
+/// ("Oct 26 (Mon)", "Thursday, November 5", "16 Nov 2026")
+pub(crate) static STANDALONE_DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+)?(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?)(?:,?\s+\d{4})?\s*(?:\(\s*(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*\))?$").unwrap()
+});
+
+/// A line that opens with a time range ("4-5pm", "Noon-1pm", "7:00 PM – 9:00 PM: Talk")
+pub(crate) static LEADING_TIME_RANGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon|midnight)\s*(?:-|–|—|to)\s*(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon|midnight)\b").unwrap()
+});
+
+/// "Rain Date", "Snow date", "Save the Date": a label for a date, not an event title
+pub(crate) static DATE_LABEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bdates?\b").unwrap());
+
 pub(crate) static TIME_SINGLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:at|@|starts?|begins?|time:?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b|\b(\d{1,2})(?::(\d{2}))\s*(am|pm|a\.m\.|p\.m\.)\b").unwrap()
 });

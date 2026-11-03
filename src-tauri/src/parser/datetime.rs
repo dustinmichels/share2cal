@@ -2,8 +2,8 @@ use chrono::{
     DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime,
 };
 use crate::parser::regex::{
-    DAY_MONTH_DATE_RE, MONTH_DAY_DATE_RE, MONTH_DAY_PATTERN_RE, NUMERIC_DATE_RE, NUM_DATE_RE,
-    REL_DATE_RE, TIME_12H_RE, TIME_24H_RANGE_RE, TIME_24H_RE, TIME_RANGE_EXTRACT_RE,
+    DAY_MONTH_DATE_RE, MONTH_DAY_DATE_RE, MONTH_DAY_PATTERN_RE, NOON_MIDNIGHT_RE, NUMERIC_DATE_RE,
+    NUM_DATE_RE, REL_DATE_RE, TIME_12H_RE, TIME_24H_RANGE_RE, TIME_24H_RE, TIME_RANGE_EXTRACT_RE,
     TIME_SINGLE_RE, WEEKDAY_DAY_RE, YEAR_RE,
 };
 
@@ -196,8 +196,12 @@ pub fn parse_hour_min(hour_str: &str, min_str: Option<&str>, ampm_str: Option<&s
 pub fn extract_times(text: &str) -> Option<(NaiveTime, Option<NaiveTime>)> {
     let clean_text = text.replace('\n', " ");
 
-    // Pattern 1: Time range like "12-5pm", "12:00 PM - 5:00 PM", "7:00pm - 10:00pm", "12pm - 5pm", "10am to 2pm"
-    if let Some(caps) = TIME_RANGE_EXTRACT_RE.captures(&clean_text) {
+    // Pattern 1: Time range like "12-5pm", "12:00 PM - 5:00 PM", "7:00pm - 10:00pm", "12pm - 5pm", "10am to 2pm".
+    // "Noon" and "midnight" count as range endpoints ("Noon-1pm", "10pm-midnight").
+    let range_text = NOON_MIDNIGHT_RE.replace_all(&clean_text, |caps: &::regex::Captures| {
+        if caps[1].eq_ignore_ascii_case("noon") { "12pm" } else { "12am" }
+    });
+    if let Some(caps) = TIME_RANGE_EXTRACT_RE.captures(&range_text) {
         let start_hour_str = caps.get(1).unwrap().as_str();
         let start_min_str = caps.get(2).map(|m| m.as_str());
         let start_ampm_str = caps.get(3).map(|m| m.as_str());
@@ -353,5 +357,15 @@ mod tests {
         // Wednesday should resolve to tomorrow (Sep 9, 2026)
         let wednesday = get_weekday_date("wed", tuesday_ref).unwrap();
         assert_eq!(wednesday, NaiveDate::from_ymd_opt(2026, 9, 9).unwrap());
+    }
+
+    #[test]
+    fn test_extract_times_noon_and_midnight_range_endpoints() {
+        let t = |h| NaiveTime::from_hms_opt(h, 0, 0).unwrap();
+        assert_eq!(extract_times("Noon-1pm"), Some((t(12), Some(t(13)))));
+        assert_eq!(extract_times("12 noon - 2pm"), Some((t(12), Some(t(14)))));
+        assert_eq!(extract_times("10pm-midnight"), Some((t(22), Some(t(0)))));
+        // "afternoon" is not "noon"; a bare noon is still a start time
+        assert_eq!(extract_times("Join us in the afternoon at noon"), Some((t(12), None)));
     }
 }

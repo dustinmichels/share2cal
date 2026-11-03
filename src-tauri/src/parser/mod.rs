@@ -10,6 +10,7 @@ pub mod regex;
 pub mod rrule;
 pub mod schedule;
 pub mod schema;
+pub mod series;
 
 pub use agenda::parse_agenda_events;
 pub use datetime::{
@@ -29,6 +30,7 @@ pub use schema::{
     estimate_token_count, generate_extraction_prompt, get_gbnf_grammar, get_json_schema,
     trim_ocr_text_to_budget, MAX_PROMPT_TOKENS,
 };
+pub use series::parse_series_events;
 
 use regex::{COURSE_CODE_ANCHORED_RE, DAY_PATTERN_RE, TIME_RANGE_RE, URL_RE, WWW_RE};
 
@@ -92,7 +94,7 @@ impl ReferenceContext {
     }
 }
 
-/// Deterministic fallback parser implementing multi-event schedule, agenda, and single-event parsing
+/// Deterministic fallback parser implementing multi-event schedule, series, agenda, and single-event parsing
 pub fn parse_events_deterministic(ocr_text: &str, context: &ReferenceContext) -> Vec<EventDetails> {
     let lines: Vec<&str> = ocr_text
         .lines()
@@ -101,33 +103,24 @@ pub fn parse_events_deterministic(ocr_text: &str, context: &ReferenceContext) ->
         .collect();
     let doc_url = extract_url(&lines, ocr_text);
 
-    // 1. Try class schedule table parsing
-    let mut schedule_events = parse_schedule_table_events(ocr_text, context);
-    if schedule_events.len() >= 2 {
-        if let Some(u) = &doc_url {
-            for ev in &mut schedule_events {
-                if ev.url.is_none() {
-                    ev.url = Some(u.clone());
+    // 1. Class schedule table, 2. series flyer (one block per dated event), 3. agenda lines
+    let strategies: [fn(&str, &ReferenceContext) -> Vec<EventDetails>; 3] =
+        [parse_schedule_table_events, parse_series_events, parse_agenda_events];
+    for strategy in strategies {
+        let mut events = strategy(ocr_text, context);
+        if events.len() >= 2 {
+            if let Some(u) = &doc_url {
+                for ev in &mut events {
+                    if ev.url.is_none() {
+                        ev.url = Some(u.clone());
+                    }
                 }
             }
+            return events;
         }
-        return schedule_events;
     }
 
-    // 2. Try generic agenda / multi-event line parsing
-    let mut agenda_events = parse_agenda_events(ocr_text, context);
-    if agenda_events.len() >= 2 {
-        if let Some(u) = &doc_url {
-            for ev in &mut agenda_events {
-                if ev.url.is_none() {
-                    ev.url = Some(u.clone());
-                }
-            }
-        }
-        return agenda_events;
-    }
-
-    // 3. Fallback to single event parsing
+    // 4. Fallback to single event parsing
     let mut single = parse_single_event_deterministic(ocr_text, context);
     if single.url.is_none() && doc_url.is_some() {
         single.url = doc_url;

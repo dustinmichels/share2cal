@@ -11,7 +11,9 @@ import {
   type EventDetails,
 } from "../services/event";
 
-const selectedCalendarId = defineModel<string>("selectedCalendarId", { default: "" });
+const selectedCalendarId = defineModel<string>("selectedCalendarId", {
+  default: "",
+});
 
 const props = withDefaults(
   defineProps<{
@@ -39,19 +41,26 @@ const emit = defineEmits<{
   (e: "removeEvent", index: number): void;
   (e: "tryAgain"): void;
 }>();
-interface WeekPreviewEvent {
+interface CalendarPreviewEvent {
   event: EventDetails;
   index: number;
   timeLabel: string;
+  startTimeLabel: string;
   recurrenceLabel: string | null;
 }
 
-interface WeekPreviewDay {
+interface CalendarPreviewDay {
   key: string;
   weekdayLabel: string;
   dateLabel: string;
-  events: WeekPreviewEvent[];
+  /** Day-of-month for month grid cells; includes the month on the 1st and the first cell. */
+  monthCellLabel: string;
+  events: CalendarPreviewEvent[];
 }
+
+/** Longest span the month grid renders; later events are counted as outside the preview. */
+const MAX_MONTH_WEEKS = 6;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const eventCount = computed(() => props.events.length);
 const isMultiple = computed(() => eventCount.value > 1);
@@ -62,33 +71,55 @@ const overallConfidence = computed(() => {
   return Math.round((sum / props.events.length) * 100);
 });
 
-const previewMode = defineModel<"week" | "details">("previewMode", { default: "details" });
-
-const weekStartKey = computed(() => {
-  const eventDateKeys = props.events
-    .map(getEventDateKey)
-    .filter((key): key is string => Boolean(key));
-  if (eventDateKeys.length === 0) return null;
-
-  const firstEventDate = dateFromLocalKey(eventDateKeys.sort()[0]);
-  const weekStart = new Date(firstEventDate);
-  weekStart.setDate(firstEventDate.getDate() - firstEventDate.getDay());
-  return formatLocalDateKey(weekStart);
+const previewMode = defineModel<"week" | "details">("previewMode", {
+  default: "details",
 });
 
-const weekDays = computed<WeekPreviewDay[]>(() => {
-  if (!weekStartKey.value) return [];
+const sortedEventDateKeys = computed(() =>
+  props.events
+    .map(getEventDateKey)
+    .filter((key): key is string => Boolean(key))
+    .sort(),
+);
 
-  const weekStart = dateFromLocalKey(weekStartKey.value);
-  const days: WeekPreviewDay[] = [];
+const calendarStart = computed(() => {
+  const keys = sortedEventDateKeys.value;
+  return keys.length ? startOfWeek(dateFromLocalKey(keys[0])) : null;
+});
 
-  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + dayOffset);
+/** Weeks spanned by the dated events, from the first event's week to the last event's week. */
+const spannedWeekCount = computed(() => {
+  const keys = sortedEventDateKeys.value;
+  if (!calendarStart.value) return 0;
+  const lastWeekStart = startOfWeek(dateFromLocalKey(keys[keys.length - 1]));
+  return Math.round((lastWeekStart.getTime() - calendarStart.value.getTime()) / (7 * DAY_MS)) + 1;
+});
+
+const calendarLayout = computed<"week" | "month">(() =>
+  spannedWeekCount.value > 1 ? "month" : "week",
+);
+
+const calendarDays = computed<CalendarPreviewDay[]>(() => {
+  const start = calendarStart.value;
+  if (!start) return [];
+
+  const weekCount = Math.min(spannedWeekCount.value, MAX_MONTH_WEEKS);
+  const days: CalendarPreviewDay[] = [];
+
+  for (let dayOffset = 0; dayOffset < weekCount * 7; dayOffset++) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + dayOffset);
+    const showMonth = dayOffset === 0 || date.getDate() === 1;
     days.push({
       key: formatLocalDateKey(date),
       weekdayLabel: date.toLocaleDateString(undefined, { weekday: "short" }),
-      dateLabel: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      dateLabel: date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      }),
+      monthCellLabel: showMonth
+        ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+        : String(date.getDate()),
       events: [],
     });
   }
@@ -102,6 +133,7 @@ const weekDays = computed<WeekPreviewDay[]>(() => {
       event,
       index,
       timeLabel: formatWeekEventTime(event),
+      startTimeLabel: formatCompactStartTime(event),
       recurrenceLabel: formatRecurrenceForDisplay(event.recurrence_rule),
     });
   });
@@ -113,15 +145,15 @@ const weekDays = computed<WeekPreviewDay[]>(() => {
   return days;
 });
 
-const weekDayKeys = computed(() => new Set(weekDays.value.map((day) => day.key)));
+const weekdayHeaders = computed(() =>
+  calendarDays.value.slice(0, 7).map((day) => day.weekdayLabel),
+);
 
-const eventsOutsidePreviewWeek = computed(() => {
-  if (!weekStartKey.value) return 0;
-  return props.events.filter((event) => {
-    const eventDateKey = getEventDateKey(event);
-    return eventDateKey && !weekDayKeys.value.has(eventDateKey);
-  }).length;
-});
+const calendarDayKeys = computed(() => new Set(calendarDays.value.map((day) => day.key)));
+
+const eventsOutsidePreview = computed(
+  () => sortedEventDateKeys.value.filter((key) => !calendarDayKeys.value.has(key)).length,
+);
 
 const unscheduledEventCount = computed(
   () => props.events.filter((event) => !getEventDateKey(event)).length,
@@ -147,6 +179,12 @@ function formatLocalDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function startOfWeek(date: Date): Date {
+  const weekStart = new Date(date);
+  weekStart.setDate(date.getDate() - date.getDay());
+  return weekStart;
+}
+
 function getEventSortValue(event: EventDetails): number {
   if (event.is_all_day) return -1;
   if (!event.start_time) return Number.MAX_SAFE_INTEGER;
@@ -162,6 +200,17 @@ function formatWeekEventTime(event: EventDetails): string {
   if (startTimeStr && endTimeStr) return `${startTimeStr}–${endTimeStr}`;
   if (startTimeStr) return startTimeStr;
   return "Time TBD";
+}
+
+/** Short start time for narrow month cells, e.g. "4 PM" or "4:30 PM". */
+function formatCompactStartTime(event: EventDetails): string {
+  if (event.is_all_day) return "All day";
+  const start = event.start_time ? new Date(event.start_time) : null;
+  if (!start || Number.isNaN(start.getTime())) return "Time TBD";
+  return start.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: start.getMinutes() === 0 ? undefined : "2-digit",
+  });
 }
 
 function formatEventTiming(event: EventDetails): string {
@@ -254,11 +303,13 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
       </div>
     </div>
 
-    <!-- One-week calendar-style preview -->
+    <!-- Calendar-style preview: one week, or a month grid when events span several weeks -->
     <div
       v-if="previewMode === 'week'"
       class="week-preview-card"
-      aria-label="One week calendar preview"
+      :aria-label="
+        calendarLayout === 'month' ? 'Month calendar preview' : 'One week calendar preview'
+      "
     >
       <div class="week-preview-heading">
         <div>
@@ -270,9 +321,41 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
         >
       </div>
 
-      <div v-if="weekDays.length" class="week-preview-grid" role="list">
+      <div v-if="calendarDays.length && calendarLayout === 'month'" class="month-preview">
+        <div class="month-weekday-row" aria-hidden="true">
+          <span v-for="label in weekdayHeaders" :key="label" class="month-weekday">{{
+            label
+          }}</span>
+        </div>
+        <div class="month-preview-grid" role="list">
+          <section
+            v-for="day in calendarDays"
+            :key="day.key"
+            class="month-day-cell"
+            :class="{ 'has-events': day.events.length > 0 }"
+            role="listitem"
+            :aria-label="`${day.weekdayLabel}, ${day.dateLabel}`"
+          >
+            <span class="month-day-number">{{ day.monthCellLabel }}</span>
+            <button
+              v-for="previewEvent in day.events"
+              :key="`${day.key}-${previewEvent.index}`"
+              type="button"
+              class="month-event-chip"
+              :aria-label="`Edit event: ${previewEvent.event.title || 'Untitled event'}, ${previewEvent.timeLabel}`"
+              @click="emit('editEvent', previewEvent.index)"
+            >
+              <span class="month-event-time">{{ previewEvent.startTimeLabel }}</span>
+              <span class="month-event-title">{{
+                previewEvent.event.title || "Untitled Event"
+              }}</span>
+            </button>
+          </section>
+        </div>
+      </div>
+      <div v-else-if="calendarDays.length" class="week-preview-grid" role="list">
         <section
-          v-for="day in weekDays"
+          v-for="day in calendarDays"
           :key="day.key"
           class="week-day-column"
           :class="{ 'has-events': day.events.length > 0 }"
@@ -320,13 +403,13 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
       </div>
 
       <p
-        v-if="eventsOutsidePreviewWeek || unscheduledEventCount || hasRepeatingEvents"
+        v-if="eventsOutsidePreview || unscheduledEventCount || hasRepeatingEvents"
         class="week-preview-note"
       >
-        <template v-if="eventsOutsidePreviewWeek">
-          {{ eventsOutsidePreviewWeek }}
-          {{ eventsOutsidePreviewWeek === 1 ? "event is" : "events are" }}
-          outside this preview week.
+        <template v-if="eventsOutsidePreview">
+          {{ eventsOutsidePreview }}
+          {{ eventsOutsidePreview === 1 ? "event is" : "events are" }}
+          outside this preview.
         </template>
         <template v-if="unscheduledEventCount">
           {{ unscheduledEventCount }}
@@ -355,7 +438,9 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
         <div class="preview-item-header">
           <div class="title-with-badge">
             <span v-if="isMultiple" class="event-index-chip">#{{ index + 1 }}</span>
-            <h3 class="event-preview-title">{{ event.title || "Untitled Event" }}</h3>
+            <h3 class="event-preview-title">
+              {{ event.title || "Untitled Event" }}
+            </h3>
           </div>
           <div class="header-right-meta">
             <span v-if="addedIndices?.has(index)" class="badge-pill badge-pill-added">
@@ -550,7 +635,8 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
         <select id="preview-target-cal" v-model="selectedCalendarId" class="destination-select">
           <option value="">Default Calendar (System)</option>
           <option v-for="cal in availableCalendars" :key="cal.id" :value="cal.id">
-            {{ cal.title }} {{ cal.source_title ? `· ${cal.source_title}` : "" }}
+            {{ cal.title }}
+            {{ cal.source_title ? `· ${cal.source_title}` : "" }}
           </option>
         </select>
       </div>
@@ -1038,6 +1124,95 @@ async function handleOpenUrl(e: MouseEvent, url?: string | null) {
   font-size: 0.74rem;
   color: var(--text-tertiary);
   line-height: 1.4;
+}
+
+.month-weekday-row,
+.month-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.month-weekday-row {
+  margin-bottom: 0.3rem;
+}
+
+.month-weekday {
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: var(--text-tertiary);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.month-day-cell {
+  min-height: 64px;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card-subtle);
+  border-radius: 8px;
+  padding: 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.month-day-cell.has-events {
+  border-color: rgba(0, 122, 255, 0.28);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.07);
+}
+
+.month-day-number {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.month-day-cell.has-events .month-day-number {
+  color: var(--text-primary);
+}
+
+.month-event-chip {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-left: 2px solid var(--accent-primary);
+  border-radius: 5px;
+  background: var(--accent-primary-light);
+  color: var(--text-primary);
+  padding: 0.2rem 0.18rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.month-event-time {
+  font-size: 0.5rem;
+  font-weight: 800;
+  color: var(--accent-primary);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.month-event-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 @media (prefers-color-scheme: dark) {

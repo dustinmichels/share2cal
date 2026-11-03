@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[test]
 fn test_parsed_json_manifest_loads_all_samples() {
     let manifest = load_parsed_json_manifest();
-    assert_eq!(manifest.len(), 7, "parsed.json must contain all 7 sample images");
+    assert_eq!(manifest.len(), 8, "parsed.json must contain all 8 sample images");
     assert!(manifest.contains_key("samples/class.png"));
     assert!(manifest.contains_key("samples/classes.png"));
     assert!(manifest.contains_key("samples/commons.jpg"));
@@ -19,6 +19,7 @@ fn test_parsed_json_manifest_loads_all_samples() {
     assert!(manifest.contains_key("samples/instagram.png"));
     assert!(manifest.contains_key("samples/ride_for_life.png"));
     assert!(manifest.contains_key("samples/squirrel_flower.jpg"));
+    assert!(manifest.contains_key("samples/streets_for_people.jpg"));
 
     assert_eq!(manifest.get("samples/class.png").unwrap().len(), 1);
     assert_eq!(manifest.get("samples/classes.png").unwrap().len(), 6);
@@ -27,6 +28,7 @@ fn test_parsed_json_manifest_loads_all_samples() {
     assert_eq!(manifest.get("samples/instagram.png").unwrap().len(), 1);
     assert_eq!(manifest.get("samples/ride_for_life.png").unwrap().len(), 1);
     assert_eq!(manifest.get("samples/squirrel_flower.jpg").unwrap().len(), 1);
+    assert_eq!(manifest.get("samples/streets_for_people.jpg").unwrap().len(), 3);
 }
 
 #[test]

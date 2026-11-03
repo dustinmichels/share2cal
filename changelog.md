@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Month layout for Calendar View (`src/components/EventPreviewCard.vue`)**: when dated events span more than one week, Calendar View renders a 7-column month grid (Sun–Sat rows from the first event's week through the last event's week, up to 6 weeks) with compact time + title chips, instead of a single week that hid later events. Events within one week still use the week layout.
+- **Series flyer parsing (`src-tauri/src/parser/series.rs`, `src-tauri/src/parser/datetime.rs`)**: posters listing several dated blocks (title, date line, time, venue, blurb) now yield one event per block, tried after schedule tables and before agendas. Time ranges accept `noon` and `midnight` endpoints (`Noon-1pm`). New sample `samples/streets_for_people.jpg` (3 events) added to `samples/parsed.json` and `parsed.md`.
 - **Developer documentation site (`docs/`)**: VitePress site covering setup, iPhone installs, architecture, the scan pipeline, sharing, OCR, rule-based parsing, the on-device LLM, calendar integration, the frontend, and reference pages for IPC commands, data types, configuration and testing. Run with `bun run docs:dev` after `bun install` in `docs/`.
 - **Desktop Drag & Drop Image Import (`src-tauri/src/share.rs`, `src-tauri/src/lib.rs`, `src/services/share.ts`, `src/App.vue`, `src/components/UploadHub.vue`)**:
 - Added native desktop drag-and-drop support listening to Tauri webview events (`onDragDropEvent`) when files are dragged from Finder or File Explorer.
